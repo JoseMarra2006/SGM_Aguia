@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SGM</string>
+    <string name="title_activity_main">SGM</string>
+    <string name="package_name">com.aguia_florestal.app</string>
+    <string name="custom_url_scheme">com.aguia_florestal.app</string>
+</resources>
