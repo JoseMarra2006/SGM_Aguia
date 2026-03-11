@@ -243,6 +243,8 @@ const useAuthStore = create((set, get) => ({
 
     if (error) {
       console.error('[Auth] Falha ao carregar perfil:', error.message);
+      await supabase.auth.signOut();
+      set({ session: null, profile: null });
       return;
     }
 
