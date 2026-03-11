@@ -12,6 +12,9 @@ import Login from './pages/Login/Login';
 // Descomente conforme cada módulo for implementado.
 
 // import Dashboard       from './pages/Dashboard/Dashboard';
+import Listagem from './pages/Equipamentos/Listagem';
+import Cadastro from './pages/Equipamentos/Cadastro';
+import Detalhe   from './pages/Equipamentos/Detalhes';
 // import Equipamentos    from './pages/Equipamentos/Equipamentos';
 // import EquipamentoDetalhe from './pages/Equipamentos/EquipamentoDetalhe';
 // import Preventivas     from './pages/Preventivas/Preventivas';
