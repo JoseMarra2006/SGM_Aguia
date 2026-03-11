@@ -3,196 +3,119 @@
 import { create } from 'zustand';
 import { supabase } from '../services/supabase';
 
-/**
- * authStore — Sessão, perfil e permissões do usuário autenticado.
- *
- * Ciclo de vida:
- *  1. initAuth() é chamado em App.jsx no mount — restaura sessão existente.
- *  2. Supabase onAuthStateChange mantém o estado sincronizado automaticamente.
- *  3. loginWithCPF() busca o email vinculado ao CPF e autentica via Supabase Auth.
- *  4. logout() encerra a sessão local e no Supabase.
- *
- * Separação de responsabilidades:
- *  - `session`  → objeto bruto do Supabase Auth (tokens, expiração)
- *  - `profile`  → registro da tabela `usuarios` (role, nome, senha_alterada, etc.)
- *  - `isReady`  → true após a verificação inicial de sessão (evita flash de tela de login)
- */
-
 const useAuthStore = create((set, get) => ({
-  // ─────────────────────────────────────────
-  // ESTADO
-  // ─────────────────────────────────────────
-
-  /** @type {import('@supabase/supabase-js').Session | null} */
   session: null,
-
-  /**
-   * @typedef {Object} UserProfile
-   * @property {string}  id
-   * @property {'superadmin'|'mecanico'} role
-   * @property {string}  nome_completo
-   * @property {string}  cpf
-   * @property {string}  email
-   * @property {boolean} senha_alterada
-   */
-  /** @type {UserProfile | null} */
   profile: null,
-
-  /** Impede render prematuro antes de verificar sessão existente. */
   isReady: false,
-
-  /** Erros de autenticação para exibição na UI. */
   authError: null,
-
-  /** Controla o estado de carregamento das chamadas de auth. */
   isLoading: false,
+  isAuthenticated: false,
+  isSuperAdmin: false,
+  isMecanico: false,
+  mustChangePassword: false,
 
   // ─────────────────────────────────────────
-  // GETTERS DERIVADOS
+  // INICIALIZAÇÃO (A Mágica do F5)
   // ─────────────────────────────────────────
-
-  get isAuthenticated() {
-    return get().session !== null && get().profile !== null;
-  },
-
-  get isSuperAdmin() {
-    return get().profile?.role === 'superadmin';
-  },
-
-  get isMecanico() {
-    return get().profile?.role === 'mecanico';
-  },
-
-  /** True se o usuário precisa trocar a senha (primeiro login). */
-  get mustChangePassword() {
-    return get().profile?.senha_alterada === false;
-  },
-
-  // ─────────────────────────────────────────
-  // INICIALIZAÇÃO
-  // ─────────────────────────────────────────
-
-  /**
-   * Inicializa o listener de sessão do Supabase.
-   * Deve ser chamado UMA VEZ em App.jsx via useEffect.
-   * Retorna a função de cleanup do listener.
-   */
   initAuth: () => {
-    // Verifica sessão existente ao abrir o app
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    // 1. Ao recarregar a página (F5), ele checa o cache silenciosamente e destrava a tela.
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       if (session) {
+        set({ session });
         await get()._loadProfile(session.user.id);
       }
-      set({ session, isReady: true });
-    });
+      set({ isReady: true }); // O comando que tira a roda infinita da tela!
+    };
 
-    // Listener reativo para login/logout/refresh automático de token
+    checkSession();
+
+    // 2. O Observador agora só fica cuidando de quando você clica em "Sair"
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('[Auth] Evento:', event);
+        if (event === 'INITIAL_SESSION') return; // Ignora pq o checkSession já fez isso
+
+        if (event === 'SIGNED_OUT') {
+          set({
+            session: null,
+            profile: null,
+            isAuthenticated: false,
+            isSuperAdmin: false,
+            isMecanico: false,
+            mustChangePassword: false,
+          });
+          return;
+        }
 
         if (session) {
           set({ session });
-          await get()._loadProfile(session.user.id);
-        } else {
-          set({ session: null, profile: null });
-        }
-
-        // Marca como pronto após qualquer evento inicial
-        if (!get().isReady) {
-          set({ isReady: true });
+          const profileAtual = get().profile;
+          if (!profileAtual || profileAtual.id !== session.user.id) {
+            await get()._loadProfile(session.user.id);
+          }
         }
       }
     );
 
-    // Retorna cleanup para ser usado no useEffect do App.jsx
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
   },
 
   // ─────────────────────────────────────────
-  // LOGIN
+  // LOGIN (Código EXATO do Claude que você testou)
   // ─────────────────────────────────────────
-
-  /**
-   * Autentica via CPF + senha.
-   * O CPF é usado para descobrir o email cadastrado, pois o Supabase Auth
-   * trabalha com email/senha internamente.
-   *
-   * @param {string} cpf    - CPF sem formatação (apenas dígitos)
-   * @param {string} senha
-   * @returns {Promise<{ success: boolean, mustChangePassword?: boolean }>}
-   */
   loginWithCPF: async (cpf, senha) => {
     set({ isLoading: true, authError: null });
 
     try {
-      // 1. Busca o email vinculado ao CPF na tabela usuarios
-      //    NOTA: Esta query usa a service role? Não — usa anon key com RLS.
-      //    A policy de SELECT em `usuarios` permite busca por CPF sem estar autenticado?
-      //    Para isso, crie uma RLS policy específica ou uma função RPC pública:
-      //
-      //    CREATE OR REPLACE FUNCTION public.fn_email_por_cpf(p_cpf TEXT)
-      //    RETURNS TEXT AS $$
-      //      SELECT email FROM public.usuarios WHERE cpf = p_cpf LIMIT 1;
-      //    $$ LANGUAGE sql SECURITY DEFINER;
-      //
-      //    Isso evita expor a tabela inteira anonimamente.
-
       const { data: emailData, error: emailError } = await supabase
         .rpc('fn_email_por_cpf', { p_cpf: cpf.replace(/\D/g, '') });
 
       if (emailError || !emailData) {
-        throw new Error('CPF não encontrado. Verifique o número digitado.');
+        throw new Error('CPF não encontrado no sistema.');
       }
 
-      // 2. Autentica com email + senha no Supabase Auth
       const { data, error: loginError } = await supabase.auth.signInWithPassword({
         email: emailData,
         password: senha,
       });
 
       if (loginError) {
-        // Traduz erros comuns do Supabase para português
-        if (loginError.message.includes('Invalid login credentials')) {
-          throw new Error('CPF ou senha incorretos.');
-        }
-        throw new Error(loginError.message);
+        throw new Error('CPF ou senha incorretos.');
       }
 
-      // 3. Carrega perfil completo
       await get()._loadProfile(data.user.id);
 
-      const mustChangePassword = get().profile?.senha_alterada === false;
+      const profileCarregado = get().profile;
+      if (!profileCarregado) {
+        throw new Error(
+          'Perfil não encontrado. Verifique se o usuário existe na tabela "usuarios".'
+        );
+      }
 
-      set({ isLoading: false });
-      return { success: true, mustChangePassword };
+      return { success: true, mustChangePassword: get().mustChangePassword };
 
     } catch (err) {
-      set({ isLoading: false, authError: err.message });
+      set({ authError: err.message });
       return { success: false };
+
+    } finally {
+      // ✅ A CORREÇÃO DO CLAUDE QUE NUNCA DEIXA TRAVAR
+      set({ isLoading: false });
     }
   },
 
   // ─────────────────────────────────────────
-  // TROCA DE SENHA (PRIMEIRO LOGIN)
+  // TROCA DE SENHA (Código EXATO do Claude)
   // ─────────────────────────────────────────
-
-  /**
-   * Atualiza a senha do usuário e marca `senha_alterada = true`.
-   * @param {string} novaSenha
-   * @returns {Promise<{ success: boolean }>}
-   */
   changePassword: async (novaSenha) => {
     set({ isLoading: true, authError: null });
 
     try {
-      // 1. Atualiza a senha no Supabase Auth
-      const { error: authError } = await supabase.auth.updateUser({
-        password: novaSenha,
-      });
+      const { error: authError } = await supabase.auth.updateUser({ password: novaSenha });
       if (authError) throw authError;
 
-      // 2. Marca senha_alterada = true na tabela usuarios
       const userId = get().session?.user?.id;
       const { error: dbError } = await supabase
         .from('usuarios')
@@ -201,39 +124,32 @@ const useAuthStore = create((set, get) => ({
 
       if (dbError) throw dbError;
 
-      // 3. Atualiza o perfil local
       set((state) => ({
         profile: { ...state.profile, senha_alterada: true },
-        isLoading: false,
+        mustChangePassword: false,
       }));
 
       return { success: true };
+
     } catch (err) {
-      set({ isLoading: false, authError: err.message });
+      set({ authError: err.message });
       return { success: false };
+
+    } finally {
+      set({ isLoading: false });
     }
   },
 
   // ─────────────────────────────────────────
-  // LOGOUT
+  // LOGOUT (Código EXATO do Claude)
   // ─────────────────────────────────────────
-
-  /**
-   * Encerra a sessão local e no Supabase.
-   */
   logout: async () => {
     await supabase.auth.signOut();
-    set({ session: null, profile: null, authError: null });
   },
 
   // ─────────────────────────────────────────
-  // INTERNOS
+  // INTERNO (Código EXATO do Claude)
   // ─────────────────────────────────────────
-
-  /**
-   * Carrega o perfil completo do usuário da tabela `usuarios`.
-   * @param {string} userId
-   */
   _loadProfile: async (userId) => {
     const { data, error } = await supabase
       .from('usuarios')
@@ -243,12 +159,23 @@ const useAuthStore = create((set, get) => ({
 
     if (error) {
       console.error('[Auth] Falha ao carregar perfil:', error.message);
-      await supabase.auth.signOut();
-      set({ session: null, profile: null });
+      set({
+        profile: null,
+        isAuthenticated: false,
+        isSuperAdmin: false,
+        isMecanico: false,
+        mustChangePassword: false,
+      });
       return;
     }
 
-    set({ profile: data });
+    set({
+      profile: data,
+      isAuthenticated: true,
+      isSuperAdmin: data.role === 'superadmin',
+      isMecanico: data.role === 'mecanico',
+      mustChangePassword: data.senha_alterada === false,
+    });
   },
 
   clearAuthError: () => set({ authError: null }),
