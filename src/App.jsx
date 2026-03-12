@@ -5,11 +5,13 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'rea
 import useAuthStore from './store/authStore';
 import useAppStore from './store/appStore';
 import { initSync } from './services/sync';
-import Login from './pages/Login/Login';
 
-import Listagem from './pages/Equipamentos/Listagem';
-import Cadastro from './pages/Equipamentos/Cadastro';
-import Detalhe  from './pages/Equipamentos/Detalhes';
+import Login                from './pages/Login/Login';
+import Listagem             from './pages/Equipamentos/Listagem';
+import Cadastro             from './pages/Equipamentos/Cadastro';
+import Detalhe              from './pages/Equipamentos/Detalhes';
+import ListagemPreventivas  from './pages/Preventivas/Listagem';
+import Checklist            from './pages/Preventivas/Checklist';
 
 function Placeholder({ title }) {
   return (
@@ -75,9 +77,9 @@ function PublicOnlyRoute() {
 }
 
 function AppInitializer() {
-  const initAuth = useAuthStore((s) => s.initAuth);
+  const initAuth    = useAuthStore((s) => s.initAuth);
   const loadLastSyncAt = useAppStore((s) => s.loadLastSyncAt);
-  const loadQueues = useAppStore((s) => s.loadQueuesFromStorage);
+  const loadQueues  = useAppStore((s) => s.loadQueuesFromStorage);
 
   useEffect(() => {
     const unsubAuth = initAuth();
@@ -87,8 +89,8 @@ function AppInitializer() {
 
     const style = document.createElement('style');
     style.textContent = `
-      @keyframes spin { to { transform: rotate(360deg); } }
-      @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes spin    { to { transform: rotate(360deg); } }
+      @keyframes fadeIn  { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
       * { box-sizing: border-box; }
       body { margin: 0; padding: 0; }
       input:focus { outline: none; border-color: #0F4C81 !important; box-shadow: 0 0 0 3px rgba(15,76,129,0.12) !important; }
@@ -101,6 +103,7 @@ function AppInitializer() {
       document.head.removeChild(style);
     };
   }, []);
+
   return null;
 }
 
@@ -109,33 +112,44 @@ export default function App() {
     <BrowserRouter>
       <AppInitializer />
       <Routes>
+
+        {/* Raiz → login */}
         <Route path="/" element={<Navigate to="/login" replace />} />
 
+        {/* Rotas públicas */}
         <Route element={<PublicOnlyRoute />}>
           <Route path="/login" element={<Login />} />
         </Route>
 
+        {/* Rotas privadas — qualquer usuário autenticado */}
         <Route element={<PrivateRoute />}>
-          {/* Módulo 1 — Equipamentos 100% Conectados! */}
-          <Route path="/equipamentos" element={<Listagem />} />
-          <Route path="/equipamentos/:id" element={<Detalhe />} />
-          <Route path="/preventivas" element={<Placeholder title="Preventivas" />} />
-          <Route path="/preventivas/:agendamentoId/checklist" element={<Placeholder title="Checklist" />} />
-          <Route path="/corretivas" element={<Placeholder title="Ordens de Serviço" />} />
-          <Route path="/corretivas/nova" element={<Placeholder title="Nova OS" />} />
-          <Route path="/corretivas/:id" element={<Placeholder title="Detalhe da OS" />} />
 
+          {/* Módulo 1 — Equipamentos ✅ */}
+          <Route path="/equipamentos"     element={<Listagem />} />
+          <Route path="/equipamentos/:id" element={<Detalhe />} />
+
+          {/* Módulo 2 — Preventivas ✅ */}
+          <Route path="/preventivas"                          element={<ListagemPreventivas />} />
+          <Route path="/preventivas/:agendamentoId/checklist" element={<Checklist />} />
+
+          {/* Módulo 3 — Corretivas ⏳ */}
+          <Route path="/corretivas"      element={<Placeholder title="Ordens de Serviço" />} />
+          <Route path="/corretivas/nova" element={<Placeholder title="Nova OS" />} />
+          <Route path="/corretivas/:id"  element={<Placeholder title="Detalhe da OS" />} />
+
+          {/* Rotas exclusivas do SuperAdmin */}
           <Route element={<SuperAdminRoute />}>
-            {/* Como o Dashboard ainda não existe, redirecionamos direto para Equipamentos */}
-            <Route path="/dashboard" element={<Navigate to="/equipamentos" replace />} />
-            <Route path="/dashboard/usuarios" element={<Placeholder title="Gerenciar Usuários" />} />
-            <Route path="/dashboard/pecas" element={<Placeholder title="Gerenciar Peças" />} />
-            {/* Rota de Cadastro de Equipamento */}
-            <Route path="/equipamentos/novo" element={<Cadastro />} />
+            <Route path="/dashboard"           element={<Navigate to="/equipamentos" replace />} />
+            <Route path="/dashboard/usuarios"  element={<Placeholder title="Gerenciar Usuários" />} />
+            <Route path="/dashboard/pecas"     element={<Placeholder title="Gerenciar Peças" />} />
+            <Route path="/equipamentos/novo"   element={<Cadastro />} />
           </Route>
+
         </Route>
 
+        {/* 404 → login */}
         <Route path="*" element={<Navigate to="/login" replace />} />
+
       </Routes>
     </BrowserRouter>
   );
