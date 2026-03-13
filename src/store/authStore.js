@@ -8,7 +8,7 @@ const useAuthStore = create((set, get) => ({
   // ─── Estado ────────────────────────────────────────────────────────────────
   session:            null,
   profile:            null,
-  isReady:            false,
+  isReady:            false,   // true apenas quando initAuth terminou de verificar sessão
   authError:          null,
   isLoading:          false,
 
@@ -18,12 +18,28 @@ const useAuthStore = create((set, get) => ({
   isMecanico:         false,
   mustChangePassword: false,
 
-  // ─── initAuth ──────────────────────────────────────────────────────────────
-  // Chamado UMA vez no AppInitializer (App.jsx). Retorna o cleanup do listener.
-  initAuth: () => {
+  // Flag interna de idempotência — impede que initAuth corra duas vezes
+  // (necessário no React StrictMode que monta componentes duas vezes)
+  _authInitialized:   false,
 
-    // REQUISITO 1 — Failsafe: force isReady=true após 2.5 s se o Supabase não
-    // responder, evitando o travamento eterno da SplashScreen.
+  // ─── initAuth ──────────────────────────────────────────────────────────────
+  // Chamado UMA vez no AppInitializer (App.jsx). Retorna função de cleanup.
+  //
+  // DESIGN INTENCIONAL:
+  //  • isReady=true é definido AQUI (no finally de checkSession), e em NENHUM
+  //    outro lugar — nem dentro de _loadProfile, nem no listener.
+  //    Isso evita que o PublicOnlyRoute redirecione no meio do loginWithCPF.
+  //
+  //  • O listener de onAuthStateChange é bloqueado enquanto isLoading=true,
+  //    garantindo que o fluxo manual de login não seja interrompido.
+  initAuth: () => {
+    // ── Guarda de idempotência ──────────────────────────────────────────────
+    if (get()._authInitialized) {
+      return () => {}; // já inicializado, retorna cleanup vazio
+    }
+    set({ _authInitialized: true });
+
+    // ── Failsafe: libera a UI após 2.5 s se o Supabase não responder ────────
     const safetyTimeout = setTimeout(() => {
       if (!get().isReady) {
         console.warn('[Auth] safetyTimeout acionado — forçando isReady=true.');
@@ -31,49 +47,48 @@ const useAuthStore = create((set, get) => ({
       }
     }, 2500);
 
-    // REQUISITO 2 — Fluxo de recuperação de sessão prioritário:
-    // getSession → _loadProfile → isReady=true (nessa ordem, sem corrida).
+    // ── Verificação de sessão existente (F5 / reload) ────────────────────────
+    // isReady=true é SEMPRE definido no finally deste bloco,
+    // independentemente de haver sessão ou não.
     const checkSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
 
         if (session) {
           set({ session });
-          // _loadProfile já define isReady=true em qualquer desfecho (req. 4)
+          // _loadProfile NÃO seta isReady — apenas carrega dados de perfil
           await get()._loadProfile(session.user.id);
-        } else {
-          // Sem sessão: libera a UI imediatamente
-          set({ isReady: true });
         }
+        // Se não houver sessão, o finally abaixo libera a UI
       } catch (err) {
         console.error('[Auth] Erro ao recuperar sessão:', err.message);
-        set({ isReady: true });
       } finally {
+        // ✅ ÚNICO lugar onde isReady=true é definido no fluxo de init
         clearTimeout(safetyTimeout);
+        set({ isReady: true });
       }
     };
 
     checkSession();
 
-    // REQUISITO 3 — Listener reativo para eventos pós-inicialização.
-    // • Ignora INITIAL_SESSION (conflitaria com checkSession acima).
-    // • Ignora qualquer evento enquanto um login manual estiver em andamento
-    //   (isLoading=true), pois loginWithCPF chama _loadProfile diretamente.
+    // ── Listener reativo para eventos pós-inicialização ──────────────────────
+    // Ignoramos INITIAL_SESSION (tratado por checkSession acima).
+    // Ignoramos qualquer evento enquanto loginWithCPF estiver rodando (isLoading).
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        // Bloqueia evento de inicialização — já tratado por checkSession
         if (event === 'INITIAL_SESSION') return;
 
-        // Bloqueia enquanto loginWithCPF estiver rodando
+        // Bloqueia enquanto loginWithCPF estiver no controle
         if (get().isLoading) return;
 
         console.log('[Auth] onAuthStateChange:', event);
 
         if (session) {
           set({ session });
+          // _loadProfile aqui não precisa setar isReady pois já é true
           await get()._loadProfile(session.user.id);
         } else {
-          // Logout ou expiração de token
+          // SIGNED_OUT / expiração de token: reset completo
           set({
             session:            null,
             profile:            null,
@@ -81,7 +96,7 @@ const useAuthStore = create((set, get) => ({
             isSuperAdmin:       false,
             isMecanico:         false,
             mustChangePassword: false,
-            isReady:            true,   // garante que a UI desbloqueie
+            // isReady permanece true — a UI pode redirecionar para /login
           });
         }
       }
@@ -94,8 +109,14 @@ const useAuthStore = create((set, get) => ({
   },
 
   // ─── loginWithCPF ──────────────────────────────────────────────────────────
-  // isLoading=true durante todo o fluxo → onAuthStateChange fica bloqueado
-  // para não conflitar com a chamada direta a _loadProfile aqui.
+  // DESIGN INTENCIONAL:
+  //  • isLoading=true bloqueia o listener de onAuthStateChange durante todo o fluxo.
+  //  • isLoading=false é SEMPRE definido no finally — nunca travará o spinner.
+  //  • isReady já é true quando o usuário chega na tela de login
+  //    (initAuth completou sem sessão). Por isso, _loadProfile pode setar
+  //    isAuthenticated=true sem causar redirect automático antes do return.
+  //  • A navegação para /dashboard é responsabilidade de Login.jsx,
+  //    que recebe o result diretamente do await.
   loginWithCPF: async (cpf, senha) => {
     set({ isLoading: true, authError: null });
 
@@ -118,21 +139,25 @@ const useAuthStore = create((set, get) => ({
         throw new Error('CPF ou senha incorretos.');
       }
 
-      // 3. Carrega perfil completo (seta isAuthenticated, isSuperAdmin etc.)
+      // 3. Carrega perfil completo (define isAuthenticated, isSuperAdmin etc.)
+      //    _loadProfile NÃO toca em isReady nem isLoading
       await get()._loadProfile(data.user.id);
 
-      // 4. Verifica se o perfil foi carregado (RLS pode ter bloqueado)
+      // 4. Valida que o perfil foi realmente carregado (RLS pode ter bloqueado)
       if (!get().profile) {
         await supabase.auth.signOut();
         throw new Error('Perfil não encontrado. Contate o administrador.');
       }
 
-      set({ isLoading: false });
       return { success: true, mustChangePassword: get().mustChangePassword };
 
     } catch (err) {
-      set({ isLoading: false, authError: err.message });
+      set({ authError: err.message });
       return { success: false };
+
+    } finally {
+      // ✅ Garante que isLoading sempre volta a false, mesmo em caso de erro
+      set({ isLoading: false });
     }
   },
 
@@ -154,21 +179,23 @@ const useAuthStore = create((set, get) => ({
       set((state) => ({
         profile:            { ...state.profile, senha_alterada: true },
         mustChangePassword: false,
-        isLoading:          false,
       }));
 
       return { success: true };
+
     } catch (err) {
-      set({ isLoading: false, authError: err.message });
+      set({ authError: err.message });
       return { success: false };
+
+    } finally {
+      set({ isLoading: false });
     }
   },
 
   // ─── logout ────────────────────────────────────────────────────────────────
-  // O signOut dispara onAuthStateChange(SIGNED_OUT) — o listener cuida do reset
-  // do estado. O set aqui é um seguro extra para o caso de o listener demorar.
   logout: async () => {
     await supabase.auth.signOut();
+    // Reset imediato — o listener de onAuthStateChange também fará isso
     set({
       session:            null,
       profile:            null,
@@ -181,8 +208,12 @@ const useAuthStore = create((set, get) => ({
   },
 
   // ─── _loadProfile (interno) ────────────────────────────────────────────────
-  // REQUISITO 4 — Em qualquer desfecho (sucesso ou erro), isReady=true é
-  // garantido para que o sistema possa redirecionar o usuário ao invés de travar.
+  // RESPONSABILIDADE: Carregar dados de perfil do banco e atualizar o estado
+  // de autenticação (isAuthenticated, isSuperAdmin, profile, etc.)
+  //
+  // NÃO TOCA em: isReady, isLoading
+  // Quem controla isReady: initAuth (checkSession.finally)
+  // Quem controla isLoading: loginWithCPF (finally) e changePassword (finally)
   _loadProfile: async (userId) => {
     try {
       const { data, error } = await supabase
@@ -192,9 +223,8 @@ const useAuthStore = create((set, get) => ({
         .single();
 
       if (error) {
-        // Erro de RLS ou rede: não faz signOut automático — deixa o PrivateRoute
-        // redirecionar para /login via isAuthenticated=false.
         console.error('[Auth] Falha ao carregar perfil:', error.message);
+        // Não faz signOut automático — deixa o PrivateRoute agir via isAuthenticated=false
         set({
           session:            null,
           profile:            null,
@@ -202,7 +232,7 @@ const useAuthStore = create((set, get) => ({
           isSuperAdmin:       false,
           isMecanico:         false,
           mustChangePassword: false,
-          isReady:            true,   // CRÍTICO: desbloqueia a UI
+          // ⚠️ NÃO seta isReady aqui
         });
         return;
       }
@@ -213,18 +243,17 @@ const useAuthStore = create((set, get) => ({
         isSuperAdmin:       data.role === 'superadmin',
         isMecanico:         data.role === 'mecanico',
         mustChangePassword: data.senha_alterada === false,
-        isReady:            true,   // CRÍTICO: desbloqueia a UI
+        // ⚠️ NÃO seta isReady aqui
       });
 
     } catch (err) {
-      // Erro inesperado (rede, parse, etc.)
       console.error('[Auth] Erro inesperado em _loadProfile:', err.message);
       set({
         isAuthenticated:    false,
         isSuperAdmin:       false,
         isMecanico:         false,
         mustChangePassword: false,
-        isReady:            true,   // CRÍTICO: desbloqueia a UI
+        // ⚠️ NÃO seta isReady aqui
       });
     }
   },
