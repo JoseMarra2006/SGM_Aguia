@@ -30,6 +30,51 @@ function Input({ label, id, error, ...props }) {
   );
 }
 
+// ─── Modal de alerta de segurança ─────────────────────────────────────────
+// Exibido após login bem-sucedido para lembrar o usuário de deslogar.
+
+function SecurityAlertModal({ nomeUsuario, onConfirm }) {
+  return (
+    <div style={styles.modalOverlay}>
+      <div style={{ ...styles.modalBox, ...styles.securityBox }}>
+        {/* Ícone */}
+        <div style={styles.securityIconWrapper}>
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
+              stroke="#0F4C81" strokeWidth="2"
+              strokeLinecap="round" strokeLinejoin="round"
+            />
+            <path
+              d="M9 12l2 2 4-4"
+              stroke="#0F4C81" strokeWidth="2"
+              strokeLinecap="round" strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+
+        <h2 style={styles.securityTitle}>
+          Bem-vindo, {nomeUsuario}!
+        </h2>
+
+        <p style={styles.securityMsg}>
+          Assim que terminar suas tarefas,{' '}
+          <strong>deslogue para mais segurança!</strong>
+        </p>
+
+        <p style={styles.securitySub}>
+          Dispositivos compartilhados na oficina precisam de atenção extra.
+          O sistema faz logout automático após 24 horas de inatividade.
+        </p>
+
+        <button onClick={onConfirm} style={styles.securityBtn}>
+          Entendido, vamos lá!
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Modal de troca obrigatória de senha ──────────────────────────────────
 // Exibido quando mustChangePassword=true (primeiro acesso do usuário).
 
@@ -108,12 +153,15 @@ function ChangePasswordModal({ onSuccess }) {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { loginWithCPF, isLoading, authError, clearAuthError } = useAuthStore();
+  const { loginWithCPF, isLoading, authError, clearAuthError, profile } = useAuthStore();
 
   const [cpf,   setCPF]   = useState('');
   const [senha, setSenha] = useState('');
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
+
+  // Controla qual modal está visível
+  // null | 'security' | 'changePassword'
+  const [modalAtivo, setModalAtivo] = useState(null);
 
   // ── Validação local ──────────────────────────────────────────────────────
   const validate = () => {
@@ -126,13 +174,12 @@ export default function Login() {
   };
 
   // ── Submissão do login ───────────────────────────────────────────────────
-  // DESIGN INTENCIONAL:
-  //  • A navegação para /dashboard ocorre AQUI, de forma explícita,
-  //    após loginWithCPF retornar com sucesso.
-  //  • Não há useEffect observando isAuthenticated para navegar —
-  //    isso evitaria a condição de corrida com o PublicOnlyRoute.
-  //  • loginWithCPF garante isLoading=false em seu bloco finally
-  //    antes de retornar, então o spinner para em qualquer cenário.
+  //
+  // FLUXO:
+  //  1. Login bem-sucedido → exibe SecurityAlertModal
+  //  2. Usuário confirma o alerta → navega para /dashboard
+  //     OU, se mustChangePassword, exibe ChangePasswordModal primeiro
+  //
   const handleLogin = async () => {
     clearAuthError();
     setFieldErrors({});
@@ -140,29 +187,36 @@ export default function Login() {
 
     const rawCPF = cpf.replace(/\D/g, '');
     const result = await loginWithCPF(rawCPF, senha);
-    // loginWithCPF garantiu isLoading=false antes de chegar aqui (finally block)
 
     if (result?.success) {
       if (result.mustChangePassword) {
-        // Usuário precisa trocar a senha antes de acessar o sistema
-        setShowPasswordModal(true);
+        // Primeiro acesso: troca de senha antes do alerta de segurança
+        setModalAtivo('changePassword');
       } else {
-        // ✅ Navegação explícita — o spinner parou e o perfil está carregado
-        navigate('/dashboard', { replace: true });
+        // Login normal: exibe alerta de segurança
+        setModalAtivo('security');
       }
     }
-    // Se !result.success, authError já foi setado pelo store — o componente re-renderiza com o erro
+    // Se !result.success, authError já foi setado pelo store
   };
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') handleLogin();
   };
 
-  // Chamado pelo modal de troca de senha após sucesso
-  const handlePasswordChanged = () => {
-    setShowPasswordModal(false);
+  // Chamado após o usuário confirmar o alerta de segurança
+  const handleSecurityConfirm = () => {
+    setModalAtivo(null);
     navigate('/dashboard', { replace: true });
   };
+
+  // Chamado após troca de senha bem-sucedida no primeiro acesso
+  const handlePasswordChanged = () => {
+    // Após trocar a senha, exibe o alerta de segurança antes de entrar
+    setModalAtivo('security');
+  };
+
+  const primeiroNome = profile?.nome_completo?.split(' ')[0] ?? 'usuário';
 
   return (
     <div style={styles.page}>
@@ -224,7 +278,7 @@ export default function Login() {
               autoComplete="current-password"
             />
 
-            {/* Erro de autenticação retornado pelo store */}
+            {/* Erro de autenticação */}
             {authError && (
               <div style={styles.authError}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
@@ -250,8 +304,16 @@ export default function Login() {
         </div>
       </div>
 
-      {/* Modal de troca obrigatória de senha */}
-      {showPasswordModal && (
+      {/* Modal de alerta de segurança */}
+      {modalAtivo === 'security' && (
+        <SecurityAlertModal
+          nomeUsuario={primeiroNome}
+          onConfirm={handleSecurityConfirm}
+        />
+      )}
+
+      {/* Modal de troca obrigatória de senha (primeiro acesso) */}
+      {modalAtivo === 'changePassword' && (
         <ChangePasswordModal onSuccess={handlePasswordChanged} />
       )}
     </div>
@@ -350,7 +412,8 @@ const styles = {
     marginTop: '32px', textAlign: 'center',
     fontSize: '12px', color: '#94A3B8', lineHeight: 1.5,
   },
-  // Modal
+
+  // ─── Modal base (troca de senha) ────────────────────────────────────────
   modalOverlay: {
     position: 'fixed', inset: 0,
     backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
@@ -375,4 +438,35 @@ const styles = {
     fontSize: '14px', color: '#64748B', margin: '0 0 28px 0', lineHeight: 1.6,
   },
   modalForm: { display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' },
+
+  // ─── Modal de segurança ─────────────────────────────────────────────────
+  securityBox: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    textAlign: 'center', padding: '40px 32px',
+  },
+  securityIconWrapper: {
+    width: '72px', height: '72px', borderRadius: '50%',
+    backgroundColor: 'rgba(15,76,129,0.1)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    marginBottom: '20px',
+  },
+  securityTitle: {
+    fontSize: '22px', fontWeight: '800', color: '#0D1B2A',
+    margin: '0 0 12px 0', letterSpacing: '-0.4px',
+  },
+  securityMsg: {
+    fontSize: '16px', color: '#374151', margin: '0 0 10px 0',
+    lineHeight: 1.55,
+  },
+  securitySub: {
+    fontSize: '13px', color: '#94A3B8', margin: '0 0 28px 0',
+    lineHeight: 1.6,
+  },
+  securityBtn: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    width: '100%', padding: '14px', fontSize: '15px', fontWeight: '700',
+    color: '#FFFFFF', backgroundColor: '#0F4C81',
+    border: 'none', borderRadius: '10px', cursor: 'pointer',
+    fontFamily: 'inherit', letterSpacing: '0.2px',
+  },
 };

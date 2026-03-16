@@ -1,275 +1,346 @@
 // src/store/authStore.js
 
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { supabase } from '../services/supabase';
 
-const useAuthStore = create((set, get) => ({
+// ─── Constantes ────────────────────────────────────────────────────────────────
+const INATIVIDADE_LIMITE_MS = 24 * 60 * 60 * 1000; // 24 horas em ms
+const STORAGE_KEY = '@sgm:auth';                    // chave no localStorage
 
-  // ─── Estado ────────────────────────────────────────────────────────────────
-  session:            null,
-  profile:            null,
-  isReady:            false,   // true apenas quando initAuth terminou de verificar sessão
-  authError:          null,
-  isLoading:          false,
+// ─── Store com persistência ───────────────────────────────────────────────────
+//
+// ARQUITETURA DE PERSISTÊNCIA:
+//  • O middleware `persist` salva no localStorage apenas os campos de
+//    `partialize`: profile, isAuthenticated, isSuperAdmin, isMecanico,
+//    mustChangePassword e lastActivity.
+//
+//  • A sessão JWT NÃO é persistida aqui — o Supabase já faz isso via
+//    `persistSession: true` no cliente (supabase.js). O Zustand persist
+//    guarda somente o estado da UI (perfil, roles) para evitar flash de
+//    tela de login ao reabrir o app.
+//
+//  • isReady NUNCA é persistido. Começa false em todo boot e vira true
+//    apenas após initAuth validar a sessão Supabase em tempo real.
+//    Isso garante que o estado reidratado não "atropele" a verificação real.
+//
+// FLUXO DE REIDRATAÇÃO (app abre):
+//  1. Zustand reidrata profile/isAuthenticated do localStorage
+//  2. isReady = false → SplashScreen exibida
+//  3. initAuth roda → checa inatividade de 24h → verifica token Supabase
+//  4a. Tudo ok → isReady = true → /dashboard (sem tela de login)
+//  4b. Inativo > 24h OU token inválido → logout → isReady = true → /login
+//
+// SEGURANÇA MULTI-USUÁRIO:
+//  • logout() chama localStorage.removeItem(STORAGE_KEY), garantindo que
+//    nenhum dado do usuário anterior persista para o próximo.
 
-  // Estados fixos (não getters) — garantem reatividade correta do Zustand
-  isAuthenticated:    false,
-  isSuperAdmin:       false,
-  isMecanico:         false,
-  mustChangePassword: false,
+const useAuthStore = create(
+  persist(
+    (set, get) => ({
 
-  // Flag interna de idempotência — impede que initAuth corra duas vezes
-  // (necessário no React StrictMode que monta componentes duas vezes)
-  _authInitialized:   false,
-
-  // ─── initAuth ──────────────────────────────────────────────────────────────
-  // Chamado UMA vez no AppInitializer (App.jsx). Retorna função de cleanup.
-  //
-  // DESIGN INTENCIONAL:
-  //  • isReady=true é definido AQUI (no finally de checkSession), e em NENHUM
-  //    outro lugar — nem dentro de _loadProfile, nem no listener.
-  //    Isso evita que o PublicOnlyRoute redirecione no meio do loginWithCPF.
-  //
-  //  • O listener de onAuthStateChange é bloqueado enquanto isLoading=true,
-  //    garantindo que o fluxo manual de login não seja interrompido.
-  initAuth: () => {
-    // ── Guarda de idempotência ──────────────────────────────────────────────
-    if (get()._authInitialized) {
-      return () => {}; // já inicializado, retorna cleanup vazio
-    }
-    set({ _authInitialized: true });
-
-    // ── Failsafe: libera a UI após 2.5 s se o Supabase não responder ────────
-    const safetyTimeout = setTimeout(() => {
-      if (!get().isReady) {
-        console.warn('[Auth] safetyTimeout acionado — forçando isReady=true.');
-        set({ isReady: true });
-      }
-    }, 2500);
-
-    // ── Verificação de sessão existente (F5 / reload) ────────────────────────
-    // isReady=true é SEMPRE definido no finally deste bloco,
-    // independentemente de haver sessão ou não.
-    const checkSession = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-
-        if (session) {
-          set({ session });
-          // _loadProfile NÃO seta isReady — apenas carrega dados de perfil
-          await get()._loadProfile(session.user.id);
-        }
-        // Se não houver sessão, o finally abaixo libera a UI
-      } catch (err) {
-        console.error('[Auth] Erro ao recuperar sessão:', err.message);
-      } finally {
-        // ✅ ÚNICO lugar onde isReady=true é definido no fluxo de init
-        clearTimeout(safetyTimeout);
-        set({ isReady: true });
-      }
-    };
-
-    checkSession();
-
-    // ── Listener reativo para eventos pós-inicialização ──────────────────────
-    // Ignoramos INITIAL_SESSION (tratado por checkSession acima).
-    // Ignoramos qualquer evento enquanto loginWithCPF estiver rodando (isLoading).
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === 'INITIAL_SESSION') return;
-
-        // Bloqueia enquanto loginWithCPF estiver no controle
-        if (get().isLoading) return;
-
-        console.log('[Auth] onAuthStateChange:', event);
-
-        if (session) {
-          set({ session });
-          // _loadProfile aqui não precisa setar isReady pois já é true
-          await get()._loadProfile(session.user.id);
-        } else {
-          // SIGNED_OUT / expiração de token: reset completo
-          set({
-            session:            null,
-            profile:            null,
-            isAuthenticated:    false,
-            isSuperAdmin:       false,
-            isMecanico:         false,
-            mustChangePassword: false,
-            // isReady permanece true — a UI pode redirecionar para /login
-          });
-        }
-      }
-    );
-
-    return () => {
-      subscription.unsubscribe();
-      clearTimeout(safetyTimeout);
-    };
-  },
-
-  // ─── loginWithCPF ──────────────────────────────────────────────────────────
-  // DESIGN INTENCIONAL:
-  //  • isLoading=true bloqueia o listener de onAuthStateChange durante todo o fluxo.
-  //  • isLoading=false é SEMPRE definido no finally — nunca travará o spinner.
-  //  • isReady já é true quando o usuário chega na tela de login
-  //    (initAuth completou sem sessão). Por isso, _loadProfile pode setar
-  //    isAuthenticated=true sem causar redirect automático antes do return.
-  //  • A navegação para /dashboard é responsabilidade de Login.jsx,
-  //    que recebe o result diretamente do await.
-  loginWithCPF: async (cpf, senha) => {
-    set({ isLoading: true, authError: null });
-
-    try {
-      // 1. Descobre o e-mail vinculado ao CPF via RPC (SECURITY DEFINER)
-      const { data: emailData, error: emailError } = await supabase
-        .rpc('fn_email_por_cpf', { p_cpf: cpf.replace(/\D/g, '') });
-
-      if (emailError || !emailData) {
-        throw new Error('CPF não encontrado no sistema.');
-      }
-
-      // 2. Autentica no Supabase Auth
-      const { data, error: loginError } = await supabase.auth.signInWithPassword({
-        email:    emailData,
-        password: senha,
-      });
-
-      if (loginError) {
-        throw new Error('CPF ou senha incorretos.');
-      }
-
-      // 3. Salva a sessão imediatamente — necessário para que changePassword
-      //    tenha acesso ao session.user.id caso o usuário precise trocar a senha
-      //    (o onAuthStateChange está bloqueado por isLoading=true neste momento)
-      set({ session: data.session });
-
-      // 4. Carrega perfil completo (define isAuthenticated, isSuperAdmin etc.)
-      //    _loadProfile NÃO toca em isReady nem isLoading
-      await get()._loadProfile(data.user.id);
-
-      // 4. Valida que o perfil foi realmente carregado (RLS pode ter bloqueado)
-      if (!get().profile) {
-        await supabase.auth.signOut();
-        throw new Error('Perfil não encontrado. Contate o administrador.');
-      }
-
-      return { success: true, mustChangePassword: get().mustChangePassword };
-
-    } catch (err) {
-      set({ authError: err.message });
-      return { success: false };
-
-    } finally {
-      // ✅ Garante que isLoading sempre volta a false, mesmo em caso de erro
-      set({ isLoading: false });
-    }
-  },
-
-  // ─── changePassword ────────────────────────────────────────────────────────
-  changePassword: async (novaSenha) => {
-    set({ isLoading: true, authError: null });
-
-    try {
-      const { data: updatedAuth, error: authError } = await supabase.auth.updateUser({ password: novaSenha });
-      if (authError) throw authError;
-
-      // Prioriza o id retornado pelo updateUser — garantido mesmo quando
-      // onAuthStateChange está bloqueado por isLoading=true (primeiro acesso)
-      const userId = updatedAuth?.user?.id ?? get().session?.user?.id;
-      if (!userId) throw new Error('Sessão não encontrada. Faça login novamente.');
-
-      const { error: dbError } = await supabase
-        .from('usuarios')
-        .update({ senha_alterada: true })
-        .eq('id', userId);
-      if (dbError) throw dbError;
-
-      set((state) => ({
-        profile:            { ...state.profile, senha_alterada: true },
-        mustChangePassword: false,
-      }));
-
-      return { success: true };
-
-    } catch (err) {
-      set({ authError: err.message });
-      return { success: false };
-
-    } finally {
-      set({ isLoading: false });
-    }
-  },
-
-  // ─── logout ────────────────────────────────────────────────────────────────
-  logout: async () => {
-    await supabase.auth.signOut();
-    // Reset imediato — o listener de onAuthStateChange também fará isso
-    set({
+      // ─── Estado ──────────────────────────────────────────────────────────────
       session:            null,
       profile:            null,
+      isReady:            false,   // NUNCA persistido — recalculado no boot
       authError:          null,
+      isLoading:          false,
+
       isAuthenticated:    false,
       isSuperAdmin:       false,
       isMecanico:         false,
       mustChangePassword: false,
-    });
-  },
 
-  // ─── _loadProfile (interno) ────────────────────────────────────────────────
-  // RESPONSABILIDADE: Carregar dados de perfil do banco e atualizar o estado
-  // de autenticação (isAuthenticated, isSuperAdmin, profile, etc.)
-  //
-  // NÃO TOCA em: isReady, isLoading
-  // Quem controla isReady: initAuth (checkSession.finally)
-  // Quem controla isLoading: loginWithCPF (finally) e changePassword (finally)
-  _loadProfile: async (userId) => {
-    try {
-      const { data, error } = await supabase
-        .from('usuarios')
-        .select('id, role, nome_completo, cpf, email, senha_alterada')
-        .eq('id', userId)
-        .single();
+      // Timestamp da última atividade confirmada — persistido para checar 24h
+      lastActivity:       null,
 
-      if (error) {
-        console.error('[Auth] Falha ao carregar perfil:', error.message);
-        // Não faz signOut automático — deixa o PrivateRoute agir via isAuthenticated=false
+      // Flag interna de idempotência (não persistida)
+      _authInitialized:   false,
+
+      // ─── Atualiza timestamp de atividade ────────────────────────────────────
+      // Chamar sempre que o usuário realizar uma ação significativa.
+      // Já é chamado automaticamente por loginWithCPF e changePassword.
+      updateActivity: () => set({ lastActivity: Date.now() }),
+
+      // ─── initAuth ────────────────────────────────────────────────────────────
+      // Chamado UMA vez no AppInitializer (App.jsx). Retorna cleanup.
+      initAuth: () => {
+        if (get()._authInitialized) {
+          return () => {};
+        }
+        set({ _authInitialized: true });
+
+        // Failsafe: libera a UI após 3s caso o Supabase não responda
+        const safetyTimeout = setTimeout(() => {
+          if (!get().isReady) {
+            console.warn('[Auth] safetyTimeout acionado — forçando isReady=true.');
+            set({ isReady: true });
+          }
+        }, 3000);
+
+        const checkSession = async () => {
+          try {
+            // ── 1. Checa inatividade de 24h ──────────────────────────────────
+            // Feito ANTES de qualquer outra verificação para garantir que
+            // sessões antigas sejam descartadas mesmo com token Supabase válido.
+            const { lastActivity, isAuthenticated } = get();
+            if (isAuthenticated && lastActivity) {
+              const inativo = Date.now() - lastActivity;
+              if (inativo > INATIVIDADE_LIMITE_MS) {
+                console.warn('[Auth] Sessão expirada por inatividade (>24h). Fazendo logout.');
+                await get().logout();
+                return; // isReady será setado no finally
+              }
+            }
+
+            // ── 2. Verifica sessão ativa no Supabase ─────────────────────────
+            const { data: { session } } = await supabase.auth.getSession();
+
+            if (session) {
+              set({ session });
+              await get()._loadProfile(session.user.id);
+            } else if (get().isAuthenticated) {
+              // Cache diz autenticado mas Supabase não tem sessão
+              // (token expirou com app fechado) → limpa tudo
+              console.warn('[Auth] Sessão Supabase inválida. Limpando estado persistido.');
+              await get().logout();
+            }
+          } catch (err) {
+            console.error('[Auth] Erro ao recuperar sessão:', err.message);
+          } finally {
+            clearTimeout(safetyTimeout);
+            // isReady só vira true aqui — único lugar no fluxo de init
+            set({ isReady: true });
+          }
+        };
+
+        checkSession();
+
+        // ── Listener reativo pós-inicialização ───────────────────────────────
+        // Ignora INITIAL_SESSION (tratado por checkSession) e eventos
+        // durante loginWithCPF (isLoading=true).
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+          async (event, session) => {
+            if (event === 'INITIAL_SESSION') return;
+            if (get().isLoading) return;
+
+            console.log('[Auth] onAuthStateChange:', event);
+
+            if (session) {
+              set({ session });
+              await get()._loadProfile(session.user.id);
+              get().updateActivity();
+            } else {
+              // SIGNED_OUT / token expirado: reset completo
+              set({
+                session:            null,
+                profile:            null,
+                isAuthenticated:    false,
+                isSuperAdmin:       false,
+                isMecanico:         false,
+                mustChangePassword: false,
+                lastActivity:       null,
+              });
+            }
+          }
+        );
+
+        return () => {
+          subscription.unsubscribe();
+          clearTimeout(safetyTimeout);
+        };
+      },
+
+      // ─── loginWithCPF ────────────────────────────────────────────────────────
+      loginWithCPF: async (cpf, senha) => {
+        set({ isLoading: true, authError: null });
+
+        try {
+          const { data: emailData, error: emailError } = await supabase
+            .rpc('fn_email_por_cpf', { p_cpf: cpf.replace(/\D/g, '') });
+
+          if (emailError || !emailData) {
+            throw new Error('CPF não encontrado no sistema.');
+          }
+
+          const { data, error: loginError } = await supabase.auth.signInWithPassword({
+            email:    emailData,
+            password: senha,
+          });
+
+          if (loginError) {
+            throw new Error('CPF ou senha incorretos.');
+          }
+
+          // Salva sessão e registra atividade imediatamente após login
+          set({ session: data.session, lastActivity: Date.now() });
+
+          await get()._loadProfile(data.user.id);
+
+          if (!get().profile) {
+            await supabase.auth.signOut();
+            throw new Error('Perfil não encontrado. Contate o administrador.');
+          }
+
+          return { success: true, mustChangePassword: get().mustChangePassword };
+
+        } catch (err) {
+          set({ authError: err.message });
+          return { success: false };
+
+        } finally {
+          set({ isLoading: false });
+        }
+      },
+
+      // ─── changePassword ──────────────────────────────────────────────────────
+      changePassword: async (novaSenha) => {
+        set({ isLoading: true, authError: null });
+
+        try {
+          const { data: updatedAuth, error: authError } = await supabase.auth.updateUser({ password: novaSenha });
+          if (authError) throw authError;
+
+          // Prioriza o id retornado pelo updateUser — garantido mesmo com
+          // isLoading=true bloqueando o onAuthStateChange (primeiro acesso)
+          const userId = updatedAuth?.user?.id ?? get().session?.user?.id;
+          if (!userId) throw new Error('Sessão não encontrada. Faça login novamente.');
+
+          const { error: dbError } = await supabase
+            .from('usuarios')
+            .update({ senha_alterada: true })
+            .eq('id', userId);
+          if (dbError) throw dbError;
+
+          // Atualiza perfil e registra atividade após troca de senha
+          set((state) => ({
+            profile:            { ...state.profile, senha_alterada: true },
+            mustChangePassword: false,
+            lastActivity:       Date.now(),
+          }));
+
+          return { success: true };
+
+        } catch (err) {
+          set({ authError: err.message });
+          return { success: false };
+
+        } finally {
+          set({ isLoading: false });
+        }
+      },
+
+      // ─── logout ──────────────────────────────────────────────────────────────
+      // Limpa estado em memória E remove o cache persistido do localStorage.
+      // Essencial para multi-usuário: o próximo usuário começa do zero.
+      logout: async () => {
+        try {
+          await supabase.auth.signOut();
+        } catch (err) {
+          // Ignora falhas de rede — o que importa é limpar o estado local
+          console.warn('[Auth] Erro no signOut Supabase:', err.message);
+        }
+
+        // Reset completo do estado em memória
         set({
           session:            null,
           profile:            null,
+          authError:          null,
           isAuthenticated:    false,
           isSuperAdmin:       false,
           isMecanico:         false,
           mustChangePassword: false,
-          // ⚠️ NÃO seta isReady aqui
+          lastActivity:       null,
+          _authInitialized:   false,
         });
-        return;
-      }
 
-      set({
-        profile:            data,
-        isAuthenticated:    true,
-        isSuperAdmin:       data.role === 'superadmin',
-        isMecanico:         data.role === 'mecanico',
-        mustChangePassword: data.senha_alterada === false,
-        // ⚠️ NÃO seta isReady aqui
-      });
+        // Remove o cache do localStorage — garante que o próximo
+        // usuário não herde nenhum dado do anterior
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+        } catch (err) {
+          console.warn('[Auth] Erro ao limpar cache persistido:', err.message);
+        }
+      },
 
-    } catch (err) {
-      console.error('[Auth] Erro inesperado em _loadProfile:', err.message);
-      set({
-        isAuthenticated:    false,
-        isSuperAdmin:       false,
-        isMecanico:         false,
-        mustChangePassword: false,
-        // ⚠️ NÃO seta isReady aqui
-      });
+      // ─── _loadProfile (interno) ──────────────────────────────────────────────
+      // NÃO toca em: isReady, isLoading
+      _loadProfile: async (userId) => {
+        try {
+          const { data, error } = await supabase
+            .from('usuarios')
+            .select('id, role, nome_completo, cpf, email, senha_alterada')
+            .eq('id', userId)
+            .single();
+
+          if (error) {
+            console.error('[Auth] Falha ao carregar perfil:', error.message);
+            set({
+              session:            null,
+              profile:            null,
+              isAuthenticated:    false,
+              isSuperAdmin:       false,
+              isMecanico:         false,
+              mustChangePassword: false,
+              lastActivity:       null,
+            });
+            return;
+          }
+
+          set({
+            profile:            data,
+            isAuthenticated:    true,
+            isSuperAdmin:       data.role === 'superadmin',
+            isMecanico:         data.role === 'mecanico',
+            mustChangePassword: data.senha_alterada === false,
+          });
+
+        } catch (err) {
+          console.error('[Auth] Erro inesperado em _loadProfile:', err.message);
+          set({
+            isAuthenticated:    false,
+            isSuperAdmin:       false,
+            isMecanico:         false,
+            mustChangePassword: false,
+            lastActivity:       null,
+          });
+        }
+      },
+
+      // ─── Utilitários ─────────────────────────────────────────────────────────
+      clearAuthError: () => set({ authError: null }),
+
+    }),
+
+    // ─── Configuração do middleware persist ─────────────────────────────────────
+    {
+      name: STORAGE_KEY,
+      storage: createJSONStorage(() => localStorage),
+
+      // Apenas estes campos são gravados no localStorage.
+      // NUNCA persistir: isReady, isLoading, authError, session, _authInitialized
+      partialize: (state) => ({
+        profile:            state.profile,
+        isAuthenticated:    state.isAuthenticated,
+        isSuperAdmin:       state.isSuperAdmin,
+        isMecanico:         state.isMecanico,
+        mustChangePassword: state.mustChangePassword,
+        lastActivity:       state.lastActivity,
+      }),
+
+      // Hook pós-reidratação: garante que campos voláteis nunca venham do cache.
+      // Chamado assim que o persist termina de ler o localStorage.
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          state.isReady          = false;
+          state.isLoading        = false;
+          state.authError        = null;
+          state.session          = null;
+          state._authInitialized = false;
+        }
+      },
     }
-  },
-
-  // ─── Utilitários ──────────────────────────────────────────────────────────
-  clearAuthError: () => set({ authError: null }),
-
-}));
+  )
+);
 
 export default useAuthStore;
