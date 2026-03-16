@@ -13,25 +13,42 @@ function formatarCPF(v) {
     .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
 }
 
+// ─── Extração robusta da mensagem de erro do FunctionsHttpError ──────────────
+//
+// O SDK do Supabase encapsula erros HTTP da Edge Function em FunctionsHttpError.
+// A propriedade `context` contém o Response original, mas métodos como .json()
+// só podem ser chamados UMA vez e podem já estar consumidos.
+// Estratégia: tentamos ler o body de múltiplas formas, com fallback para cada.
+//
+async function extrairMensagemErro(fnError) {
+  // Tenta ler o context como Response (SDK v2 moderno)
+  try {
+    if (fnError?.context instanceof Response) {
+      const clone = fnError.context.clone(); // clone garante que podemos ler
+      const json = await clone.json();
+      if (json?.error) return json.error;
+      if (json?.message) return json.message;
+    }
+  } catch {
+    // Ignora e tenta próxima estratégia
+  }
+
+  // Tenta ler via método .json() exposto diretamente (algumas versões do SDK)
+  try {
+    if (typeof fnError?.context?.json === 'function') {
+      const json = await fnError.context.json();
+      if (json?.error) return json.error;
+      if (json?.message) return json.message;
+    }
+  } catch {
+    // Ignora
+  }
+
+  // Fallback: usa a mensagem nativa do erro
+  return fnError?.message ?? 'Erro ao contactar o servidor. Tente novamente.';
+}
+
 // ─── Modal de Cadastro de Usuário ─────────────────────────────
-//
-// ARQUITETURA DO CADASTRO:
-// ─────────────────────────────────────────────────────────────
-// O cliente Supabase (anon key) NÃO tem permissão para criar usuários
-// via supabase.auth.admin.createUser — isso requer a service_role key,
-// que não pode ficar exposta no frontend.
-//
-// Além disso, usar supabase.auth.signUp() no browser cria um
-// comportamento indesejado: ele SUBSTITUI a sessão ativa do SuperAdmin
-// pela sessão do novo usuário recém-criado.
-//
-// SOLUÇÃO: Edge Function `create-user` (supabase/functions/create-user)
-//  • Roda no servidor Supabase com acesso à service_role key
-//  • Verifica que o chamador é um SuperAdmin autenticado
-//  • Cria o usuário no Auth SEM afetar a sessão do chamador
-//  • Insere o perfil em public.usuarios com rollback automático em caso de falha
-//  • Retorna erros separados por etapa: 'auth' ou 'database'
-// ─────────────────────────────────────────────────────────────
 
 function ModalCadastro({ onClose, onSucesso }) {
   const [nome,    setNome]    = useState('');
@@ -42,20 +59,20 @@ function ModalCadastro({ onClose, onSucesso }) {
   const [senha,   setSenha]   = useState('');
   const [role,    setRole]    = useState('mecanico');
 
-  const [salvando,    setSalvando]    = useState(false);
-  const [erros,       setErros]       = useState({});
-  const [erroGlobal,  setErroGlobal]  = useState('');
+  const [salvando,   setSalvando]   = useState(false);
+  const [erros,      setErros]      = useState({});
+  const [erroGlobal, setErroGlobal] = useState('');
 
   // ── Validação local ────────────────────────────────────────────────────────
   const validar = () => {
     const e = {};
-    if (!nome.trim())                             e.nome  = 'Nome obrigatório.';
-    if (nome.trim().length < 3)                   e.nome  = 'Nome muito curto (mínimo 3 caracteres).';
+    if (!nome.trim())                               e.nome  = 'Nome obrigatório.';
+    else if (nome.trim().length < 3)                e.nome  = 'Nome muito curto (mínimo 3 caracteres).';
     const cpfRaw = cpf.replace(/\D/g, '');
-    if (cpfRaw.length !== 11)                     e.cpf   = 'CPF inválido. Digite os 11 dígitos.';
-    if (!email.trim() || !email.includes('@'))    e.email = 'E-mail inválido.';
-    if (senha.length < 8)                         e.senha = 'Senha deve ter no mínimo 8 caracteres.';
-    if (!['mecanico', 'superadmin'].includes(role)) e.role = 'Tipo de usuário inválido.';
+    if (cpfRaw.length !== 11)                       e.cpf   = 'CPF inválido. Digite os 11 dígitos.';
+    if (!email.trim() || !email.includes('@'))      e.email = 'E-mail inválido.';
+    if (senha.length < 8)                           e.senha = 'Senha deve ter no mínimo 8 caracteres.';
+    if (!['mecanico', 'superadmin'].includes(role)) e.role  = 'Tipo de usuário inválido.';
     setErros(e);
     return Object.keys(e).length === 0;
   };
@@ -68,38 +85,31 @@ function ModalCadastro({ onClose, onSucesso }) {
 
     setSalvando(true);
     try {
-      // Chama a Edge Function create-user.
-      // O SDK do Supabase injeta automaticamente o header Authorization
-      // com o token JWT da sessão atual do SuperAdmin.
       const { data, error: fnError } = await supabase.functions.invoke('create-user', {
         body: {
           email:         email.trim().toLowerCase(),
           password:      senha,
           nome_completo: nome.trim(),
           cpf:           cpf.replace(/\D/g, ''),
-          rg:            rg.trim()       || null,
-          nome_mae:      nomeMae.trim()  || null,
+          rg:            rg.trim()      || null,
+          nome_mae:      nomeMae.trim() || null,
           role,
         },
       });
 
-      // ── Erro retornado pela Edge Function ──────────────────────────────────
+      // ── Erro retornado pelo SDK (status HTTP != 2xx) ───────────────────────
+      // FunctionsHttpError: a função respondeu com 4xx/5xx.
+      // FunctionsRelayError: erro de rede/relay antes de chegar na função.
+      // FunctionsFetchError: falha de rede total.
       if (fnError) {
-        // fnError é um FunctionsHttpError — extrai a mensagem do body
-        let msg = 'Erro ao contactar o servidor. Tente novamente.';
-        try {
-          const body = await fnError.context?.json?.() ?? {};
-          msg = body.error ?? fnError.message ?? msg;
-        } catch {
-          msg = fnError.message ?? msg;
-        }
+        const msg = await extrairMensagemErro(fnError);
         setErroGlobal(msg);
         return;
       }
 
-      // ── Erro retornado no body da função (status 4xx/5xx) ──────────────────
+      // ── Erro no body com status 2xx (não deveria ocorrer com o index.ts atual,
+      //    mas mantemos como defesa) ───────────────────────────────────────────
       if (data?.error) {
-        // A função retorna `step` para indicar onde falhou
         if (data.step === 'auth') {
           setErroGlobal(`Falha na criação da conta: ${data.error}`);
         } else if (data.step === 'database') {
@@ -114,8 +124,7 @@ function ModalCadastro({ onClose, onSucesso }) {
       onSucesso();
 
     } catch (err) {
-      // Erro de rede ou erro inesperado no próprio invoke
-      setErroGlobal(`Erro inesperado: ${err.message ?? 'Tente novamente.'}`);
+      setErroGlobal(`Erro inesperado: ${err?.message ?? 'Tente novamente.'}`);
     } finally {
       setSalvando(false);
     }
@@ -221,7 +230,6 @@ function ModalCadastro({ onClose, onSucesso }) {
             🔒 O usuário será obrigado a trocar a senha no primeiro acesso.
           </div>
 
-          {/* Erro global — com contexto de qual etapa falhou */}
           {erroGlobal && (
             <div style={S.erroGlobal}>
               <AlertIcon />
@@ -282,10 +290,10 @@ function LinhaUsuario({ usuario, index }) {
 
 export default function Usuarios() {
   const navigate = useNavigate();
-  const [usuarios,     setUsuarios]     = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [busca,        setBusca]        = useState('');
-  const [modalAberto,  setModalAberto]  = useState(false);
+  const [usuarios,    setUsuarios]    = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [busca,       setBusca]       = useState('');
+  const [modalAberto, setModalAberto] = useState(false);
 
   const fetchUsuarios = useCallback(async () => {
     setLoading(true);

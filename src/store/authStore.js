@@ -139,7 +139,12 @@ const useAuthStore = create((set, get) => ({
         throw new Error('CPF ou senha incorretos.');
       }
 
-      // 3. Carrega perfil completo (define isAuthenticated, isSuperAdmin etc.)
+      // 3. Salva a sessão imediatamente — necessário para que changePassword
+      //    tenha acesso ao session.user.id caso o usuário precise trocar a senha
+      //    (o onAuthStateChange está bloqueado por isLoading=true neste momento)
+      set({ session: data.session });
+
+      // 4. Carrega perfil completo (define isAuthenticated, isSuperAdmin etc.)
       //    _loadProfile NÃO toca em isReady nem isLoading
       await get()._loadProfile(data.user.id);
 
@@ -166,10 +171,14 @@ const useAuthStore = create((set, get) => ({
     set({ isLoading: true, authError: null });
 
     try {
-      const { error: authError } = await supabase.auth.updateUser({ password: novaSenha });
+      const { data: updatedAuth, error: authError } = await supabase.auth.updateUser({ password: novaSenha });
       if (authError) throw authError;
 
-      const userId = get().session?.user?.id;
+      // Prioriza o id retornado pelo updateUser — garantido mesmo quando
+      // onAuthStateChange está bloqueado por isLoading=true (primeiro acesso)
+      const userId = updatedAuth?.user?.id ?? get().session?.user?.id;
+      if (!userId) throw new Error('Sessão não encontrada. Faça login novamente.');
+
       const { error: dbError } = await supabase
         .from('usuarios')
         .update({ senha_alterada: true })
