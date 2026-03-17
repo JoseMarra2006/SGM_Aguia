@@ -1,7 +1,9 @@
 // src/App.jsx
 
-import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { App as CapApp } from '@capacitor/app';
+import { Dialog } from '@capacitor/dialog';
 import useAuthStore from './store/authStore.js';
 import useAppStore from './store/appStore.js';
 import { initSync } from './services/sync.js';
@@ -116,6 +118,91 @@ function PublicOnlyRoute() {
   return <Outlet />;
 }
 
+// ─── Rotas raiz (sem histórico para voltar) ───────────────────────────────
+// Nestas rotas, pressionar Voltar exibe o diálogo de saída em vez de navegar.
+const ROOT_ROUTES = ['/dashboard', '/login', '/'];
+
+// ─── Handler do botão Voltar do Android ──────────────────────────────────
+//
+// ARQUITETURA:
+//  • Componente sem UI posicionado DENTRO do BrowserRouter, garantindo
+//    acesso ao contexto do React Router (useNavigate, useLocation).
+//
+//  • O listener do Capacitor é registrado UMA ÚNICA VEZ (deps=[]).
+//    Para evitar closures obsoletos com a rota atual, usamos locationRef —
+//    uma ref atualizada a cada mudança de location sem recriar o listener.
+//
+//  • Lógica de decisão:
+//      1. `window.history.state?.idx > 0` → React Router v6 grava o índice
+//         da entrada no estado do History API. Se idx > 0, existe histórico
+//         real para navegar de volta.
+//      2. Se a rota atual for uma ROOT_ROUTE (sem contexto de "voltar"),
+//         tratamos como raiz independentemente do idx.
+//      3. Ambas as condições falsas → diálogo de confirmação de saída.
+//
+//  • Limpeza: listenerHandle.remove() no retorno do useEffect garante que
+//    o listener seja removido se o componente for desmontado (StrictMode,
+//    HMR etc.), prevenindo vazamentos de memória.
+
+function BackButtonHandler() {
+  const navigate     = useNavigate();
+  const location     = useLocation();
+  // Ref para capturar sempre a rota mais recente dentro do listener,
+  // sem precisar recriar o listener a cada mudança de rota.
+  const locationRef  = useRef(location);
+
+  // Mantém locationRef sincronizado com a rota atual
+  useEffect(() => {
+    locationRef.current = location;
+  }, [location]);
+
+  // Registra o listener UMA vez durante a vida do componente
+  useEffect(() => {
+    let listenerHandle = null;
+
+    const setupListener = async () => {
+      listenerHandle = await CapApp.addListener('backButton', async () => {
+        const currentPath = locationRef.current.pathname;
+
+        // Verifica se há histórico real de navegação (React Router v6 / History API)
+        const historyIdx  = window.history.state?.idx ?? 0;
+        const isRootRoute = ROOT_ROUTES.includes(currentPath);
+        const canGoBack   = historyIdx > 0 && !isRootRoute;
+
+        if (canGoBack) {
+          // Há histórico e não estamos numa rota raiz → navega para trás
+          navigate(-1);
+          return;
+        }
+
+        // Estamos na raiz ou sem histórico → confirma saída
+        const { value: confirmed } = await Dialog.confirm({
+          title:             'Sair do aplicativo',
+          message:           'Tem certeza que deseja sair do aplicativo? Não se preocupe, as suas atividades ficarão salvas e seu login permanecerá ativo por até 24h.',
+          okButtonTitle:     'Sair',
+          cancelButtonTitle: 'Cancelar',
+        });
+
+        if (confirmed) {
+          await CapApp.exitApp();
+        }
+        // Se cancelou, não faz nada — app continua aberto
+      });
+    };
+
+    setupListener();
+
+    // Cleanup: remove o listener ao desmontar para evitar vazamento de memória
+    return () => {
+      if (listenerHandle) {
+        listenerHandle.remove();
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null; // Componente sem UI
+}
+
 // ─── Inicializador global ─────────────────────────────────────────────────
 // Componente sem UI que inicializa auth e serviços na montagem inicial.
 // useEffect com [] garante que initAuth rode exatamente uma vez.
@@ -159,7 +246,18 @@ function AppInitializer() {
 export default function App() {
   return (
     <BrowserRouter>
+      {/*
+        AppInitializer e BackButtonHandler são posicionados DENTRO do
+        BrowserRouter para terem acesso ao contexto do React Router.
+        Ambos são componentes sem UI (retornam null).
+
+        Ordem importa:
+          1. AppInitializer → inicializa auth e serviços
+          2. BackButtonHandler → registra listener do back button nativo
+      */}
       <AppInitializer />
+      <BackButtonHandler />
+
       <Routes>
         {/* Raiz → dashboard */}
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
