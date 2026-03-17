@@ -1,33 +1,44 @@
+/* index.css — SGM Águia
+   Resetado para ambiente mobile/web: sem dark-mode padrão do Vite,
+   sem centralização vertical do body que quebra páginas full-height. */
+
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'DM Sans', system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
+  color: #0D1B2A;
+  background-color: #F4F7FA;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 a {
   font-weight: 500;
-  color: #646cff;
+  color: #20643F;
   text-decoration: inherit;
 }
+
 a:hover {
-  color: #535bf2;
+  color: #1a5233;
 }
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
+  padding: 0;
+  /* RESPONSIVIDADE: display:block em vez de flex+place-items:center
+     evita que páginas full-height sejam cortadas em mobile */
+  display: block;
   min-width: 320px;
   min-height: 100vh;
+  background-color: #F4F7FA;
 }
 
 h1 {
@@ -35,6 +46,7 @@ h1 {
   line-height: 1.1;
 }
 
+/* Reset de botão genérico — os componentes sobrescrevem via inline style */
 button {
   border-radius: 8px;
   border: 1px solid transparent;
@@ -42,27 +54,13 @@ button {
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  background-color: #1a1a1a;
+  /* RESPONSIVIDADE: transparent em vez de #1a1a1a (conflitava com botões brancos do app) */
+  background-color: transparent;
   cursor: pointer;
   transition: border-color 0.25s;
 }
-button:hover {
-  border-color: #646cff;
-}
+
 button:focus,
 button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
 }

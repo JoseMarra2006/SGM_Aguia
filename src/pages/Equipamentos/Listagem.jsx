@@ -1,4 +1,8 @@
 // src/pages/Equipamentos/Listagem.jsx
+// ALTERAÇÕES VISUAIS:
+//   • #0F4C81 → #20643F em: eyebrow, btnPrimary, filterChipActive, btnRetry
+//   • RESPONSIVIDADE: grid minmax(300px,1fr) → minmax(min(300px,100%),1fr)
+//     evita que o grid force overflow horizontal em telas < 340px
 
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -8,14 +12,14 @@ import useAuthStore from '../../store/authStore';
 
 // ─── Constantes ───────────────────────────────────────────────
 const FILTROS = [
-  { label: 'Todos', value: 'todos' },
-  { label: 'Em operação', value: 'em_operacao' },
+  { label: 'Todos',        value: 'todos' },
+  { label: 'Em operação',  value: 'em_operacao' },
   { label: 'Em manutenção', value: 'em_manutencao' },
 ];
 
 export default function Listagem() {
   const navigate = useNavigate();
-  const { isSuperAdmin, profile } = useAuthStore();
+  const { isSuperAdmin } = useAuthStore();
 
   const [equipamentos, setEquipamentos] = useState([]);
   const [filtro, setFiltro] = useState('todos');
@@ -32,10 +36,7 @@ export default function Listagem() {
         .from('equipamentos')
         .select('id, nome, descricao, status, imagens_urls')
         .order('nome', { ascending: true });
-
-      if (filtro !== 'todos') {
-        query = query.eq('status', filtro);
-      }
+      if (filtro !== 'todos') query = query.eq('status', filtro);
 
       const { data, error } = await query;
       if (error) throw error;
@@ -48,17 +49,13 @@ export default function Listagem() {
     }
   }, [filtro]);
 
-  useEffect(() => {
-    fetchEquipamentos();
-  }, [fetchEquipamentos]);
+  useEffect(() => { fetchEquipamentos(); }, [fetchEquipamentos]);
 
-  // ─── Filtragem local por nome (busca) ───────────────────────
   const equipamentosFiltrados = equipamentos.filter((eq) =>
     eq.nome.toLowerCase().includes(busca.toLowerCase().trim())
   );
 
-  // ─── Contadores para os filtros ─────────────────────────────
-  const totalOperacao = equipamentos.filter((e) => e.status === 'em_operacao').length;
+  const totalOperacao  = equipamentos.filter((e) => e.status === 'em_operacao').length;
   const totalManutencao = equipamentos.filter((e) => e.status === 'em_manutencao').length;
 
   return (
@@ -69,14 +66,12 @@ export default function Listagem() {
       <header style={S.header}>
         <div style={S.headerTop}>
           <div>
+            {/* ALTERADO: color #0F4C81 → #20643F */}
             <p style={S.eyebrow}>Módulo 1</p>
             <h1 style={S.pageTitle}>Equipamentos</h1>
           </div>
           {isSuperAdmin && (
-            <button
-              onClick={() => navigate('/equipamentos/novo')}
-              style={S.btnPrimary}
-            >
+            <button onClick={() => navigate('/equipamentos/novo')} style={S.btnPrimary}>
               <PlusIcon />
               Cadastrar
             </button>
@@ -137,11 +132,7 @@ export default function Listagem() {
         ) : (
           <div style={S.grid}>
             {equipamentosFiltrados.map((eq, i) => (
-              <CardEquipamento
-                key={eq.id}
-                {...eq}
-                index={i}
-              />
+              <CardEquipamento key={eq.id} {...eq} index={i} />
             ))}
           </div>
         )}
@@ -178,7 +169,7 @@ function ErrorState({ message, onRetry }) {
   );
 }
 
-function EmptyState({ busca, filtro, isSuperAdmin }) {
+function EmptyState({ busca, isSuperAdmin }) {
   const msg = busca
     ? `Nenhum resultado para "${busca}"`
     : 'Nenhum equipamento cadastrado nesta categoria.';
@@ -203,7 +194,8 @@ function PlusIcon() {
 }
 function SearchIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ position:'absolute', left:14, top:'50%', transform:'translateY(-50%)', color:'#94A3B8', pointerEvents:'none' }}>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      style={{ position:'absolute', left:14, top:'50%', transform:'translateY(-50%)', color:'#94A3B8', pointerEvents:'none' }}>
       <circle cx="11" cy="11" r="8" stroke="currentColor" strokeWidth="2"/>
       <path d="m21 21-4.35-4.35" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
     </svg>
@@ -258,13 +250,14 @@ const S = {
     justifyContent: 'space-between',
     marginBottom: '14px',
   },
+  // ALTERADO: color #0F4C81 → #20643F
   eyebrow: {
     margin: '0 0 2px 0',
     fontSize: '11px',
     fontWeight: '600',
     letterSpacing: '1.2px',
     textTransform: 'uppercase',
-    color: '#0F4C81',
+    color: '#20643F',
   },
   pageTitle: {
     margin: 0,
@@ -273,11 +266,12 @@ const S = {
     color: '#0D1B2A',
     letterSpacing: '-0.5px',
   },
+  // ALTERADO: backgroundColor #0F4C81 → #20643F
   btnPrimary: {
     display: 'flex',
     alignItems: 'center',
     padding: '10px 18px',
-    backgroundColor: '#0F4C81',
+    backgroundColor: '#20643F',
     color: '#FFFFFF',
     border: 'none',
     borderRadius: '10px',
@@ -291,6 +285,7 @@ const S = {
     display: 'flex',
     gap: '12px',
     marginBottom: '14px',
+    flexWrap: 'wrap',
   },
   summaryChip: {
     display: 'flex',
@@ -356,17 +351,21 @@ const S = {
     fontFamily: 'inherit',
     flexShrink: 0,
   },
+  // ALTERADO: backgroundColor/borderColor #0F4C81 → #20643F
   filterChipActive: {
-    backgroundColor: '#0F4C81',
-    borderColor: '#0F4C81',
+    backgroundColor: '#20643F',
+    borderColor: '#20643F',
     color: '#FFFFFF',
   },
   main: {
     padding: '20px',
+    boxSizing: 'border-box',
   },
+  // RESPONSIVIDADE: minmax(300px,1fr) → minmax(min(300px,100%),1fr)
+  // Impede overflow horizontal quando a tela é menor que 300px + padding
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))',
     gap: '16px',
   },
   stateBox: {
@@ -389,10 +388,11 @@ const S = {
     color: '#94A3B8',
     margin: 0,
   },
+  // ALTERADO: backgroundColor #0F4C81 → #20643F
   btnRetry: {
     marginTop: '8px',
     padding: '10px 20px',
-    backgroundColor: '#0F4C81',
+    backgroundColor: '#20643F',
     color: '#FFFFFF',
     border: 'none',
     borderRadius: '8px',

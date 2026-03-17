@@ -1,4 +1,8 @@
 // src/pages/Preventivas/Listagem.jsx
+// ALTERAÇÕES VISUAIS:
+//   • #0F4C81 → #20643F em: eyebrow, abaBtnAtiva (cor + borda inferior), verBtn, btnRetry
+//   • getStatusInfo: cor 'Hoje' #0F4C81 → #20643F (e bg/borda correspondentes)
+//   • RESPONSIVIDADE: flexWrap:'wrap' no summaryRow-like elements, minWidth:0 em cards
 
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -28,8 +32,9 @@ function getStatusInfo(agendamento) {
     return { label: 'Cancelado', cor: '#EF4444', bg: 'rgba(239,68,68,0.1)', borda: 'rgba(239,68,68,0.25)' };
   }
   const dias = diasParaData(agendamento.data_agendada);
-  if (dias < 0)  return { label: 'Atrasado', cor: '#EF4444', bg: 'rgba(239,68,68,0.08)', borda: 'rgba(239,68,68,0.2)' };
-  if (dias === 0) return { label: 'Hoje', cor: '#0F4C81', bg: 'rgba(15,76,129,0.1)', borda: 'rgba(15,76,129,0.25)' };
+  if (dias < 0)   return { label: 'Atrasado', cor: '#EF4444', bg: 'rgba(239,68,68,0.08)', borda: 'rgba(239,68,68,0.2)' };
+  // ALTERADO: cor 'Hoje' #0F4C81 → #20643F
+  if (dias === 0) return { label: 'Hoje', cor: '#20643F', bg: 'rgba(32,100,63,0.1)', borda: 'rgba(32,100,63,0.25)' };
   if (dias <= 3)  return { label: `Em ${dias}d`, cor: '#F59E0B', bg: 'rgba(245,158,11,0.1)', borda: 'rgba(245,158,11,0.25)' };
   return { label: `Em ${dias}d`, cor: '#64748B', bg: 'rgba(100,116,139,0.08)', borda: 'rgba(100,116,139,0.2)' };
 }
@@ -40,8 +45,8 @@ function CardAgendamento({ agendamento, onClick, index }) {
   const statusInfo = getStatusInfo(agendamento);
   const dias = diasParaData(agendamento.data_agendada);
   const isConcluido = agendamento.status === 'concluido';
-  const isHoje = dias === 0 && agendamento.status === 'pendente';
-  const isAlerta = dias > 0 && dias <= 3 && agendamento.status === 'pendente';
+  const isHoje    = dias === 0 && agendamento.status === 'pendente';
+  const isAlerta  = dias > 0 && dias <= 3 && agendamento.status === 'pendente';
   const isAtrasado = dias < 0 && agendamento.status === 'pendente';
 
   return (
@@ -105,7 +110,7 @@ function CardAgendamento({ agendamento, onClick, index }) {
 // ─── Tela principal ───────────────────────────────────────────
 
 const ABAS = [
-  { label: 'Pendentes', value: 'pendente' },
+  { label: 'Pendentes',  value: 'pendente' },
   { label: 'Concluídos', value: 'concluido' },
 ];
 
@@ -124,21 +129,11 @@ export default function ListagemPreventivas() {
     try {
       let query = supabase
         .from('agendamentos_preventivos')
-        .select(`
-          id,
-          data_agendada,
-          status,
-          equipamentos ( id, nome ),
-          usuarios ( id, nome_completo )
-        `)
+        .select(`id, data_agendada, status, equipamentos ( id, nome ), usuarios ( id, nome_completo )`)
         .order('data_agendada', { ascending: abaAtiva === 'pendente' });
 
-      // Mecânico só vê os próprios agendamentos
-      if (!isSuperAdmin) {
-        query = query.eq('mecanico_id', profile.id);
-      }
+      if (!isSuperAdmin) query = query.eq('mecanico_id', profile.id);
 
-      // Filtra por aba
       if (abaAtiva === 'pendente') {
         query = query.in('status', ['pendente', 'em_andamento']);
       } else {
@@ -158,7 +153,6 @@ export default function ListagemPreventivas() {
 
   useEffect(() => { fetchAgendamentos(); }, [fetchAgendamentos]);
 
-  // Contagem de alertas (próximos 3 dias)
   const totalAlertas = agendamentos.filter((a) => {
     const dias = diasParaData(a.data_agendada);
     return a.status === 'pendente' && dias >= 0 && dias <= 3;
@@ -172,6 +166,7 @@ export default function ListagemPreventivas() {
       <header style={S.header}>
         <div style={S.headerTop}>
           <div>
+            {/* ALTERADO: color #0F4C81 → #20643F */}
             <p style={S.eyebrow}>Módulo 2</p>
             <h1 style={S.pageTitle}>Preventivas</h1>
           </div>
@@ -280,34 +275,38 @@ const S = {
   page: { minHeight: '100dvh', backgroundColor: '#F4F7FA', fontFamily: "'DM Sans','Segoe UI',sans-serif" },
   header: { backgroundColor: '#FFFFFF', padding: '24px 20px 0', borderBottom: '1px solid #E8EDF2', position: 'sticky', top: 0, zIndex: 10 },
   headerTop: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px' },
-  eyebrow: { margin: '0 0 2px', fontSize: '11px', fontWeight: '600', letterSpacing: '1.2px', textTransform: 'uppercase', color: '#0F4C81' },
+  // ALTERADO: color #0F4C81 → #20643F
+  eyebrow: { margin: '0 0 2px', fontSize: '11px', fontWeight: '600', letterSpacing: '1.2px', textTransform: 'uppercase', color: '#20643F' },
   pageTitle: { margin: 0, fontSize: '26px', fontWeight: '800', color: '#0D1B2A', letterSpacing: '-0.5px' },
   alertaBadge: { display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 12px', backgroundColor: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: '20px', fontSize: '12px', fontWeight: '700', color: '#92400E' },
-  abasRow: { display: 'flex', gap: '4px', borderBottom: 'none' },
+  abasRow: { display: 'flex', gap: '4px' },
   abaBtn: { padding: '10px 20px', border: 'none', background: 'none', fontSize: '14px', fontWeight: '600', color: '#94A3B8', cursor: 'pointer', borderBottom: '2px solid transparent', fontFamily: 'inherit', transition: 'color 0.15s, border-color 0.15s' },
-  abaBtnAtiva: { color: '#0F4C81', borderBottomColor: '#0F4C81' },
-  main: { padding: '16px' },
+  // ALTERADO: color #0F4C81 → #20643F, borderBottomColor #0F4C81 → #20643F
+  abaBtnAtiva: { color: '#20643F', borderBottomColor: '#20643F' },
+  main: { padding: '16px', boxSizing: 'border-box' },
   lista: { display: 'flex', flexDirection: 'column', gap: '10px' },
   card: {
     backgroundColor: '#FFFFFF', borderRadius: '12px',
     border: '1px solid #E8EDF2', padding: '16px',
     cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '10px',
     animation: 'cardFadeIn 0.3s ease both',
-    WebkitTapHighlightColor: 'transparent', outline: 'none',
+    WebkitTapHighlightColor: 'transparent', outline: 'none', minWidth: 0,
   },
   cardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' },
-  equipInfo: { display: 'flex', alignItems: 'center', gap: '7px', overflow: 'hidden' },
+  equipInfo: { display: 'flex', alignItems: 'center', gap: '7px', overflow: 'hidden', minWidth: 0 },
   equipNome: { fontSize: '15px', fontWeight: '700', color: '#0D1B2A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.1px' },
   statusPill: { padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '700', flexShrink: 0, letterSpacing: '0.2px' },
-  cardMid: { display: 'flex', alignItems: 'center', gap: '6px' },
+  cardMid: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' },
   dataTexto: { fontSize: '13px', color: '#475569' },
   alertaTag: { display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px', backgroundColor: 'rgba(245,158,11,0.1)', color: '#92400E', border: '1px solid rgba(245,158,11,0.25)', borderRadius: '10px', fontSize: '11px', fontWeight: '600' },
   cardBot: { display: 'flex', alignItems: 'center', gap: '6px' },
   mecanicoNome: { fontSize: '12px', color: '#94A3B8', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  verBtn: { display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', fontWeight: '700', color: '#0F4C81', flexShrink: 0 },
+  // ALTERADO: color #0F4C81 → #20643F
+  verBtn: { display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', fontWeight: '700', color: '#20643F', flexShrink: 0 },
   estadoVazio: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 24px', gap: '12px', textAlign: 'center' },
   estadoTexto: { margin: 0, fontSize: '15px', color: '#64748B', fontWeight: '500' },
-  btnRetry: { padding: '10px 20px', backgroundColor: '#0F4C81', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
+  // ALTERADO: backgroundColor #0F4C81 → #20643F
+  btnRetry: { padding: '10px 20px', backgroundColor: '#20643F', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
   skeleton: { backgroundColor: '#FFFFFF', borderRadius: '12px', border: '1px solid #E8EDF2', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' },
   skeletonLine: { height: '14px', borderRadius: '6px', background: 'linear-gradient(90deg,#F0F4F8 25%,#E8EDF2 50%,#F0F4F8 75%)', backgroundSize: '400px 100%', animation: 'shimmer 1.4s infinite linear' },
 };
