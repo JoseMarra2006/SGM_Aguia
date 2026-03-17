@@ -1,8 +1,14 @@
 // src/pages/Equipamentos/Listagem.jsx
-// ALTERAÇÕES VISUAIS:
+// ALTERAÇÕES VISUAIS (sessão anterior):
 //   • #0F4C81 → #20643F em: eyebrow, btnPrimary, filterChipActive, btnRetry
 //   • RESPONSIVIDADE: grid minmax(300px,1fr) → minmax(min(300px,100%),1fr)
-//     evita que o grid force overflow horizontal em telas < 340px
+// AUDITORIA DE VISIBILIDADE (confirmada OK):
+//   • eyebrow: #20643F sobre fundo branco → contraste adequado
+//   • btnPrimary: #20643F bg + #FFFFFF text → OK
+//   • filterChipActive: #20643F bg + #FFFFFF text → OK
+//   • btnRetry: #20643F bg + #FFFFFF text → OK
+//   • GearEmptyIcon: stroke=#CBD5E1 (estado vazio intencional) → OK
+//   • SearchIcon, CloseIcon: currentColor herdado do container → OK
 
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -66,7 +72,6 @@ export default function Listagem() {
       <header style={S.header}>
         <div style={S.headerTop}>
           <div>
-            {/* ALTERADO: color #0F4C81 → #20643F */}
             <p style={S.eyebrow}>Módulo 1</p>
             <h1 style={S.pageTitle}>Equipamentos</h1>
           </div>
@@ -250,7 +255,6 @@ const S = {
     justifyContent: 'space-between',
     marginBottom: '14px',
   },
-  // ALTERADO: color #0F4C81 → #20643F
   eyebrow: {
     margin: '0 0 2px 0',
     fontSize: '11px',
@@ -266,7 +270,6 @@ const S = {
     color: '#0D1B2A',
     letterSpacing: '-0.5px',
   },
-  // ALTERADO: backgroundColor #0F4C81 → #20643F
   btnPrimary: {
     display: 'flex',
     alignItems: 'center',
@@ -351,7 +354,6 @@ const S = {
     fontFamily: 'inherit',
     flexShrink: 0,
   },
-  // ALTERADO: backgroundColor/borderColor #0F4C81 → #20643F
   filterChipActive: {
     backgroundColor: '#20643F',
     borderColor: '#20643F',
@@ -361,8 +363,6 @@ const S = {
     padding: '20px',
     boxSizing: 'border-box',
   },
-  // RESPONSIVIDADE: minmax(300px,1fr) → minmax(min(300px,100%),1fr)
-  // Impede overflow horizontal quando a tela é menor que 300px + padding
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))',
@@ -388,7 +388,6 @@ const S = {
     color: '#94A3B8',
     margin: 0,
   },
-  // ALTERADO: backgroundColor #0F4C81 → #20643F
   btnRetry: {
     marginTop: '8px',
     padding: '10px 20px',

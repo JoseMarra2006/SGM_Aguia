@@ -1,10 +1,17 @@
 // src/pages/Preventivas/Checklist.jsx
-// ALTERAÇÕES VISUAIS:
+// ALTERAÇÕES VISUAIS (sessão anterior — confirmadas OK):
 //   • #0F4C81 → #20643F em: label topbar, botão iniciar, barra de progresso, % progresso, IcoObs, botões de retorno
-//   • #0D1B2A → #20643F nos fundos do timer chip e botão finalizar (eram fundos escuros de ação primária)
+//   • #0D1B2A → #20643F nos fundos do timer chip e botão finalizar
 //   • AVISO info: rgba(15,76,129,…) → rgba(32,100,63,…), #1E3A5F → #1A4A2E
-//   • CSS de focus: border-color e box-shadow → verde
-//   • RESPONSIVIDADE: padding e maxWidth já adequados; adicionado minWidth:0 em containers críticos
+//   • CSS de focus → verde
+// AUDITORIA DE VISIBILIDADE (confirmada OK):
+//   • Timer chip: backgroundColor=#20643F, color do parent=#fff → IcoClock herda white → OK
+//   • Botão iniciar: #20643F bg + white text + IcoPlay fill=currentColor(white) → OK
+//   • Botão finalizar: #20643F bg + white text + IcoCheck c="#fff" → OK
+//   • Barra de progresso: #20643F sobre #E8EDF2 → OK
+//   • IcoObs: stroke #20643F quando ativo, #94A3B8 quando inativo → OK sobre branco
+//   • Aviso info: rgba(32,100,63,.06) bg + #1A4A2E text → OK
+//   • IcoBack, topbar back button: color=#0D1B2A sobre fundo branco → OK
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -34,17 +41,17 @@ const IcoClock = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="non
 const IcoPlay  = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>;
 const IcoCheck = ({c='currentColor'}) => <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 const IcoAlert = ({c='#EF4444'}) => <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke={c} strokeWidth="2" strokeLinecap="round"/><path d="M12 9v4M12 17h.01" stroke={c} strokeWidth="2" strokeLinecap="round"/></svg>;
-// ALTERADO: IcoObs stroke #0F4C81 → #20643F
+// IcoObs: stroke #20643F quando ativo (visível sobre branco), #94A3B8 inativo
 const IcoObs   = ({on}) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke={on?'#20643F':'#94A3B8'} strokeWidth="2" fill={on?'rgba(32,100,63,.08)':'none'}/></svg>;
 const IcoWifi  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.8M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
 const Spinner  = () => <span style={{display:'inline-block',width:15,height:15,border:'2px solid rgba(255,255,255,.3)',borderTopColor:'#fff',borderRadius:'50%',animation:'spin .7s linear infinite',marginRight:8}}/>;
 
 // ─── Aviso contextual ───────────────────────────────────────
-// ALTERADO: info bg/bd rgba(15,76,129,…) → rgba(32,100,63,…), c #1E3A5F → #1A4A2E
 const AVISO_CORES = {
   sucesso: { bg:'rgba(16,185,129,.08)',  bd:'rgba(16,185,129,.25)', c:'#065F46' },
   alerta:  { bg:'rgba(245,158,11,.08)', bd:'rgba(245,158,11,.3)',  c:'#92400E' },
   erro:    { bg:'rgba(239,68,68,.08)',   bd:'rgba(239,68,68,.25)',  c:'#991B1B' },
+  // info: verde escuro no lugar do azul anterior
   info:    { bg:'rgba(32,100,63,.06)',   bd:'rgba(32,100,63,.2)',   c:'#1A4A2E' },
 };
 function Aviso({ tipo, texto }) {
@@ -123,7 +130,6 @@ function TelaConcluido({ equipamento, duracao, naoConformes, offline, onVoltar }
             ⚠ {naoConformes} item(ns) não conforme(s). Considere abrir uma OS corretiva.
           </div>
         )}
-        {/* ALTERADO: backgroundColor #0F4C81 → #20643F */}
         <button onClick={onVoltar} style={{padding:'13px 32px',backgroundColor:'#20643F',color:'#fff',border:'none',borderRadius:10,fontSize:14,fontWeight:700,cursor:'pointer',fontFamily:'inherit',width:'100%'}}>
           Voltar para preventivas
         </button>
@@ -149,14 +155,12 @@ function Erro({ msg, onBack }) {
     <div style={{minHeight:'100dvh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:16,fontFamily:"'DM Sans',sans-serif",padding:24,textAlign:'center',backgroundColor:'#F4F7FA'}}>
       <span style={{fontSize:48}}>⚠️</span>
       <p style={{color:'#64748B',fontSize:15,margin:0}}>{msg}</p>
-      {/* ALTERADO: backgroundColor #0F4C81 → #20643F */}
       <button onClick={onBack} style={{padding:'12px 24px',backgroundColor:'#20643F',color:'#fff',border:'none',borderRadius:10,fontSize:14,fontWeight:600,cursor:'pointer'}}>Voltar</button>
     </div>
   );
 }
 
 // ─── CSS global ─────────────────────────────────────────────
-// ALTERADO: border-color e box-shadow de focus → #20643F / rgba(32,100,63,.1)
 const CSS = `
   @keyframes spin    { to { transform:rotate(360deg); } }
   @keyframes shimmer { 0%{background-position:-400px 0} 100%{background-position:400px 0} }
@@ -333,12 +337,12 @@ export default function Checklist() {
           <IcoBack/>
         </button>
         <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0}}>
-          {/* ALTERADO: color #0F4C81 → #20643F */}
+          {/* Label 'Preventiva' em verde — visível sobre fundo branco */}
           <span style={{fontSize:11,fontWeight:600,color:'#20643F',letterSpacing:1,textTransform:'uppercase'}}>Preventiva</span>
           <span style={{fontSize:15,fontWeight:700,color:'#0D1B2A',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ag?.equipamentos?.nome}</span>
         </div>
         {fase === 'execucao' && (
-          // ALTERADO: backgroundColor #0D1B2A → #20643F (chip de ação primária)
+          // Timer chip verde — IcoClock herda color:#fff do container
           <div style={{display:'flex',alignItems:'center',gap:5,padding:'5px 11px',backgroundColor:'#20643F',borderRadius:20,color:'#fff',flexShrink:0}}>
             <IcoClock/>
             <span style={{fontSize:13,fontWeight:700,fontVariantNumeric:'tabular-nums',letterSpacing:'0.5px'}}>{fmtDuracao(segundos)}</span>
@@ -381,7 +385,7 @@ export default function Checklist() {
             {!jaConcluido && isMeu && (podeIniciar || diasR < 0) && pecas.length > 0 && (
               <>
                 {erroSalv && <div style={{padding:'12px 14px',backgroundColor:'#FEF2F2',border:'1px solid #FECACA',borderRadius:9,fontSize:13,color:'#DC2626'}}>{erroSalv}</div>}
-                {/* ALTERADO: backgroundColor #0F4C81 → #20643F */}
+                {/* Botão iniciar: #20643F bg + white text + IcoPlay fill=currentColor(white) */}
                 <button onClick={iniciar} disabled={salvando}
                   style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:15,width:'100%',backgroundColor:'#20643F',color:'#fff',border:'none',borderRadius:12,fontSize:15,fontWeight:700,cursor:'pointer',fontFamily:'inherit',opacity:salvando?.7:1}}>
                   {salvando ? <><Spinner/>Iniciando...</> : <><IcoPlay/>Iniciar checklist</>}
@@ -398,11 +402,11 @@ export default function Checklist() {
             <div style={{backgroundColor:'#fff',borderRadius:12,border:'1px solid #E8EDF2',padding:16,display:'flex',flexDirection:'column',gap:8}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <span style={{fontSize:12,fontWeight:700,color:'#374151',textTransform:'uppercase',letterSpacing:'0.3px'}}>Progresso</span>
-                {/* ALTERADO: color #0F4C81 → #20643F */}
+                {/* Percentual em verde — visível sobre branco */}
                 <span style={{fontSize:18,fontWeight:800,color:'#20643F'}}>{progresso}%</span>
               </div>
               <div style={{height:8,backgroundColor:'#E8EDF2',borderRadius:4,overflow:'hidden'}}>
-                {/* ALTERADO: backgroundColor #0F4C81 → #20643F */}
+                {/* Barra verde sobre cinza claro — contraste OK */}
                 <div style={{height:'100%',backgroundColor:'#20643F',borderRadius:4,width:`${progresso}%`,transition:'width .3s ease'}}/>
               </div>
               <span style={{fontSize:11,color:'#94A3B8'}}>{Object.values(respostas).filter(r=>r.status).length} de {pecas.length} respondidos</span>
@@ -429,7 +433,7 @@ export default function Checklist() {
               </div>
             )}
 
-            {/* ALTERADO: backgroundColor #0D1B2A → #20643F (botão de ação primária) */}
+            {/* Botão finalizar: #20643F bg + white text + IcoCheck c="#fff" */}
             <button onClick={finalizar} disabled={salvando || !podeFinz}
               style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:15,width:'100%',backgroundColor:'#20643F',color:'#fff',border:'none',borderRadius:12,fontSize:15,fontWeight:700,fontFamily:'inherit',opacity:(salvando||!podeFinz)?.5:1,cursor:(salvando||!podeFinz)?'not-allowed':'pointer'}}>
               {salvando ? <><Spinner/>Salvando...</> : <><IcoCheck c="#fff"/>Finalizar preventiva</>}

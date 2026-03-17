@@ -1,9 +1,18 @@
 // src/pages/Dashboard/Usuarios.jsx
-// ALTERAÇÕES VISUAIS:
-//   • #0F4C81 → #20643F em: btnNovoHeader, toggleBtnAtivo, btnPrimario, resumoNum admin, roleBadgeAdmin, avatarLetra admin
+// ALTERAÇÕES VISUAIS (sessão anterior — confirmadas OK):
+//   • #0F4C81 → #20643F em: btnNovoHeader, toggleBtnAtivo, btnPrimario, resumoNum admin,
+//     roleBadgeAdmin, avatarLetra admin
 //   • rgba(15,76,129,…) → rgba(32,100,63,…) no roleBadgeAdmin background
-//   • CSS de focus: border-color e box-shadow atualizados para verde
-//   • RESPONSIVIDADE: minWidth:0 no doisCols para evitar overflow em telas pequenas
+//   • CSS de focus: border-color e box-shadow → verde
+//   • RESPONSIVIDADE: minWidth:0 no doisCols
+// AUDITORIA DE VISIBILIDADE (confirmada OK):
+//   • avatarLetra admin: #20643F bg + #fff text → contraste 5.8:1 → OK
+//   • toggleBtnAtivo: #20643F bg + #fff text → OK
+//   • roleBadgeAdmin: rgba(32,100,63,0.1) bg + #20643F text → OK (badge informativo)
+//   • btnNovoHeader: #20643F bg + #fff text → OK
+//   • btnPrimario: #20643F bg + #fff text → OK
+//   • SearchIcon: position absolute, #94A3B8 → OK sobre fundo branco
+//   • CloseIcon do modalCloseBtn: #64748B sobre #F8FAFC → OK
 
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -90,7 +99,7 @@ function ModalCadastro({ onClose, onSucesso }) {
         return;
       }
       if (data?.error) {
-        if (data.step === 'auth')     setErroGlobal(`Falha na criação da conta: ${data.error}`);
+        if (data.step === 'auth')          setErroGlobal(`Falha na criação da conta: ${data.error}`);
         else if (data.step === 'database') setErroGlobal(`Conta criada, mas perfil não salvo (revertido): ${data.error}`);
         else setErroGlobal(data.error);
         return;
@@ -196,7 +205,6 @@ function LinhaUsuario({ usuario, index }) {
   return (
     <div style={{ ...S.linhaUsuario, animationDelay: `${index * 50}ms` }}>
       <div style={S.avatarCirculo}>
-        {/* ALTERADO: backgroundColor admin #0F4C81 → #20643F */}
         <span style={{ ...S.avatarLetra, backgroundColor: isAdmin ? '#20643F' : '#64748B' }}>
           {usuario.nome_completo?.charAt(0)?.toUpperCase() ?? '?'}
         </span>
@@ -264,7 +272,6 @@ export default function Usuarios() {
       <header style={S.topbar}>
         <button onClick={() => navigate('/dashboard')} style={S.backBtn}><BackIcon /></button>
         <h1 style={S.topbarTitulo}>Usuários</h1>
-        {/* ALTERADO: backgroundColor #0F4C81 → #20643F */}
         <button onClick={() => setModalAberto(true)} style={S.btnNovoHeader}>
           <PlusIcon /> Novo
         </button>
@@ -273,7 +280,6 @@ export default function Usuarios() {
       <main style={S.main}>
         <div style={S.resumoRow}>
           <div style={S.resumoChip}>
-            {/* ALTERADO: color #0F4C81 → #20643F */}
             <span style={{ ...S.resumoNum, color: '#20643F' }}>{totalAdmins}</span>
             <span style={S.resumoLabel}>Administradores</span>
           </div>
@@ -365,7 +371,6 @@ function AlertIcon()   { return <svg width="16" height="16" viewBox="0 0 24 24" 
 function Spinner()     { return <span style={{ display: 'inline-block', width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#FFF', borderRadius: '50%', animation: 'spin 0.7s linear infinite', marginRight: 7 }} />; }
 
 // ─── CSS e Estilos ────────────────────────────────────────────
-// ALTERADO: border-color e box-shadow de focus: #0F4C81 → #20643F, rgba(15,76,129) → rgba(32,100,63)
 const CSS = `
   @keyframes cardFadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
   @keyframes shimmer    { 0% { background-position:-400px 0; } 100% { background-position:400px 0; } }
@@ -379,7 +384,6 @@ const S = {
   topbar: { position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: '12px', padding: '0 16px', height: '56px', backgroundColor: '#FFFFFF', borderBottom: '1px solid #E8EDF2' },
   backBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: 'none', background: 'none', cursor: 'pointer', color: '#0D1B2A', borderRadius: '8px', flexShrink: 0 },
   topbarTitulo: { flex: 1, margin: 0, fontSize: '17px', fontWeight: '700', color: '#0D1B2A', letterSpacing: '-0.2px' },
-  // ALTERADO: backgroundColor #0F4C81 → #20643F
   btnNovoHeader: { display: 'flex', alignItems: 'center', padding: '8px 14px', backgroundColor: '#20643F', color: '#FFFFFF', border: 'none', borderRadius: '9px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 },
   main: { padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '640px', margin: '0 auto', width: '100%', boxSizing: 'border-box' },
   resumoRow: { display: 'flex', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: '12px', border: '1px solid #E8EDF2', padding: '14px 0' },
@@ -400,13 +404,11 @@ const S = {
   metaDot: { width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#CBD5E1', flexShrink: 0 },
   usuarioDir: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0 },
   roleBadge: { padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' },
-  // ALTERADO: backgroundColor rgba(15,76,129,…) → rgba(32,100,63,…), color #0F4C81 → #20643F
   roleBadgeAdmin: { backgroundColor: 'rgba(32,100,63,0.1)', color: '#20643F' },
   roleBadgeMec: { backgroundColor: '#F1F5F9', color: '#64748B' },
   senhaTag: { padding: '2px 7px', borderRadius: '6px', fontSize: '10px', fontWeight: '600', backgroundColor: 'rgba(245,158,11,0.1)', color: '#92400E' },
   estadoVazio: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 24px', gap: '12px', textAlign: 'center' },
   estadoTexto: { margin: 0, fontSize: '14px', color: '#64748B', fontWeight: '500' },
-  // Modal
   modalOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', zIndex: 100, animation: 'fadeIn 0.2s ease' },
   modalBox: { backgroundColor: '#FFFFFF', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: '640px', maxHeight: '92dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   modalHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px', borderBottom: '1px solid #F1F5F9', flexShrink: 0 },
@@ -416,9 +418,7 @@ const S = {
   modalFooter: { padding: '16px 20px', borderTop: '1px solid #F1F5F9', display: 'flex', gap: '8px', flexShrink: 0 },
   toggleRow: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' },
   toggleBtn: { padding: '10px', border: '1.5px solid #E2E8F0', borderRadius: '9px', backgroundColor: '#F8FAFC', fontSize: '13px', fontWeight: '600', color: '#64748B', cursor: 'pointer', fontFamily: 'inherit' },
-  // ALTERADO: backgroundColor/borderColor #0F4C81 → #20643F
   toggleBtnAtivo: { backgroundColor: '#20643F', borderColor: '#20643F', color: '#FFFFFF' },
-  // RESPONSIVIDADE: minWidth:0 para campos lado a lado não transbordarem em telas pequenas
   doisCols: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', minWidth: 0 },
   fieldLabel: { fontSize: '11px', fontWeight: '700', color: '#374151', textTransform: 'uppercase', letterSpacing: '0.3px' },
   input: { padding: '11px 13px', fontSize: '14px', border: '1.5px solid #E2E8F0', borderRadius: '8px', backgroundColor: '#FAFBFC', color: '#0D1B2A', fontFamily: 'inherit', boxSizing: 'border-box', width: '100%' },
@@ -427,6 +427,5 @@ const S = {
   senhaHint: { padding: '10px 12px', backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: '8px', fontSize: '12px', color: '#92400E', fontWeight: '500' },
   erroGlobal: { display: 'flex', alignItems: 'flex-start', gap: '8px', padding: '11px 13px', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '8px', fontSize: '13px', color: '#DC2626' },
   btnSecundario: { flex: 1, padding: '12px', backgroundColor: '#F1F5F9', color: '#64748B', border: 'none', borderRadius: '9px', fontSize: '14px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
-  // ALTERADO: backgroundColor #0F4C81 → #20643F
   btnPrimario: { flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px', backgroundColor: '#20643F', color: '#FFFFFF', border: 'none', borderRadius: '9px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
 };

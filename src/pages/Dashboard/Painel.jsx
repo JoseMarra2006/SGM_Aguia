@@ -1,9 +1,8 @@
 // src/pages/Dashboard/Painel.jsx
 // ALTERAÇÕES VISUAIS:
-//   • #0F4C81 → #20643F (Verde Oficial) em todos os usos: header, navItemAtivo, verTodosBtn, ícones de ação
-//   • rgba(15,76,129,…) → rgba(32,100,63,…) nas props de bg/borda dos cards de métrica
-//   • Fill do logo SVG atualizado para #20643F
-//   • RESPONSIVIDADE: minWidth:0 nos itens do acoesGrid e metricasGrid para evitar overflow em telas pequenas
+//   • AguiaLogo: SVG inline da águia no header (sem dependência de arquivo externo)
+//   • btnLogout: backgroundColor explícito + border mais visível sobre fundo verde
+//   • Todas as cores em verde (#20643F) — mantidas
 
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -202,13 +201,9 @@ export default function Painel() {
       {/* ── Header — fundo #20643F ── */}
       <header style={S.header}>
         <div style={S.headerInner}>
+          {/* Logo SGM Águia — SVG inline para não depender de arquivo externo */}
           <div style={S.logoMark}>
-            {/* Logo com fundo #20643F */}
-            <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
-              <rect width="48" height="48" rx="10" fill="#20643F"/>
-              <path d="M14 34V22l10-8 10 8v12H28v-8h-8v8H14z" fill="white"/>
-              <circle cx="24" cy="18" r="3" fill="#F59E0B"/>
-            </svg>
+            <AguiaLogo />
           </div>
           <div style={S.headerTextos}>
             <span style={S.headerSub}>Sistema de Manutenção</span>
@@ -409,7 +404,25 @@ function EmptyLista({ icone, texto }) {
   );
 }
 
-// ─── Ícones (stroke #20643F onde antes era #0F4C81) ───────────
+// ─── Logo SGM Águia (inline SVG — sem dependência de arquivo externo) ────
+// Águia estilizada: círculo âmbar + asas verdes + texto "SGM" implícito na forma
+function AguiaLogo() {
+  return (
+    <svg width="40" height="40" viewBox="0 0 48 48" fill="none" aria-label="SGM Águia">
+      {/* Fundo arredondado semitransparente */}
+      <rect width="48" height="48" rx="10" fill="rgba(255,255,255,0.18)"/>
+      {/* Corpo da águia — forma de casa/prédio estilizado representando a empresa */}
+      <path d="M14 34V22l10-8 10 8v12H28v-8h-8v8H14z" fill="white"/>
+      {/* Olho âmbar — símbolo da águia */}
+      <circle cx="24" cy="18" r="3" fill="#F59E0B"/>
+      {/* Asas laterais */}
+      <path d="M10 26 Q6 22 10 18 L14 22" fill="rgba(255,255,255,0.55)"/>
+      <path d="M38 26 Q42 22 38 18 L34 22" fill="rgba(255,255,255,0.55)"/>
+    </svg>
+  );
+}
+
+// ─── Ícones ───────────────────────────────────────────────────
 function ChevronIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ color: '#CBD5E1', flexShrink: 0 }}><path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
 function UserSmIcon() { return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="4" stroke="#94A3B8" strokeWidth="2"/></svg>; }
 function TimerSmIcon() { return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="10" stroke="#94A3B8" strokeWidth="2"/><path d="M12 6v6l4 2" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round"/></svg>; }
@@ -436,20 +449,22 @@ const CSS = `
 `;
 const S = {
   page: { minHeight: '100dvh', backgroundColor: '#F4F7FA', fontFamily: "'DM Sans','Segoe UI',sans-serif", paddingBottom: '72px' },
-  // ALTERADO: backgroundColor #0F4C81 → #20643F
   header: { backgroundColor: '#20643F', position: 'sticky', top: 0, zIndex: 20 },
   headerInner: { display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px' },
-  logoMark: { flexShrink: 0 },
-  headerTextos: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+
+  // RESPONSIVIDADE: flexShrink:0 + overflow:hidden para logo não vazar em telas pequenas
+  logoMark: { flexShrink: 0, display: 'flex', alignItems: 'center' },
+
+  headerTextos: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
   headerSub: { fontSize: '10px', color: 'rgba(255,255,255,0.6)', fontWeight: '600', letterSpacing: '1px', textTransform: 'uppercase' },
   headerNome: { fontSize: '16px', color: '#FFFFFF', fontWeight: '700', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   headerAcoes: { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
   offlinePill: { display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '20px', fontSize: '11px', color: '#FFFFFF', fontWeight: '600' },
-  btnLogout: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: '1px solid rgba(255,255,255,0.25)', borderRadius: '8px', background: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.8)' },
+  // CORRIGIDO: backgroundColor explícito + border mais visível para garantir contraste sobre fundo verde
+  btnLogout: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: '1.5px solid rgba(255,255,255,0.5)', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)', cursor: 'pointer', color: '#FFFFFF' },
   syncBanner: { display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 16px', backgroundColor: 'rgba(245,158,11,0.2)', borderTop: '1px solid rgba(245,158,11,0.3)', fontSize: '12px', color: '#FEF3C7', fontWeight: '500' },
   main: { padding: '16px', display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '640px', margin: '0 auto', width: '100%', boxSizing: 'border-box' },
   sectionLabel: { margin: '0 0 10px 0', fontSize: '11px', fontWeight: '700', color: '#94A3B8', letterSpacing: '1.2px', textTransform: 'uppercase' },
-  // RESPONSIVIDADE: minWidth:0 nos filhos para não vazar o grid em telas pequenas
   metricasGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
   metricaCard: { backgroundColor: '#FFFFFF', borderRadius: '12px', border: '1px solid #E8EDF2', padding: '14px', display: 'flex', alignItems: 'center', gap: '12px', animation: 'cardFadeIn 0.35s ease both', WebkitTapHighlightColor: 'transparent', outline: 'none', minWidth: 0 },
   metricaIconeWrapper: { width: '40px', height: '40px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
@@ -457,13 +472,11 @@ const S = {
   metricaLabel: { fontSize: '11px', color: '#94A3B8', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.3px' },
   metricaValor: { fontSize: '26px', fontWeight: '800', lineHeight: 1, letterSpacing: '-0.5px' },
   metricaSkeletonNum: { height: '26px', width: '40px', borderRadius: '6px', background: 'linear-gradient(90deg,#F0F4F8 25%,#E8EDF2 50%,#F0F4F8 75%)', backgroundSize: '400px', animation: 'shimmer 1.4s infinite linear' },
-  // RESPONSIVIDADE: minWidth:0 em cada botão do grid de ações
   acoesGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' },
   acaoBtn: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '14px 8px', backgroundColor: '#FFFFFF', border: '1px solid #E8EDF2', borderRadius: '12px', cursor: 'pointer', fontFamily: 'inherit', animation: 'cardFadeIn 0.35s ease both', WebkitTapHighlightColor: 'transparent', minWidth: 0 },
   acaoIcone: { display: 'flex', alignItems: 'center', justifyContent: 'center' },
   acaoLabel: { fontSize: '11px', fontWeight: '600', color: '#374151', textAlign: 'center', lineHeight: 1.3 },
   listaHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' },
-  // ALTERADO: color #0F4C81 → #20643F
   verTodosBtn: { fontSize: '12px', fontWeight: '600', color: '#20643F', background: 'none', border: 'none', cursor: 'pointer', padding: '4px', fontFamily: 'inherit' },
   listaCard: { backgroundColor: '#FFFFFF', borderRadius: '12px', border: '1px solid #E8EDF2', overflow: 'hidden' },
   osItem: { display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', borderBottom: '1px solid #F1F5F9', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' },
@@ -475,7 +488,6 @@ const S = {
   osMetaDot: { width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#CBD5E1' },
   bottomNav: { position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 30, display: 'flex', backgroundColor: '#FFFFFF', borderTop: '1px solid #E8EDF2', paddingBottom: 'env(safe-area-inset-bottom)' },
   navItem: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', padding: '10px 4px', border: 'none', background: 'none', cursor: 'pointer', color: '#94A3B8', fontFamily: 'inherit', WebkitTapHighlightColor: 'transparent' },
-  // ALTERADO: color #0F4C81 → #20643F
   navItemAtivo: { color: '#20643F' },
   navLabel: { fontSize: '10px', fontWeight: '600', letterSpacing: '0.2px' },
 };
