@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import useAuthStore from '../../store/authStore';
 import useAppStore from '../../store/appStore';
+import { SecurityAlertModal } from '../Login/Login.jsx';
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -102,7 +103,7 @@ function ItemPrevAtrasada({ ag, onClick }) {
 
 export default function Painel() {
   const navigate = useNavigate();
-  const { profile, isSuperAdmin, logout } = useAuthStore();
+  const { profile, isSuperAdmin, logout, showSecurityAlert, setShowSecurityAlert } = useAuthStore();
   const { isOnline, checklistQueue, osQueue } = useAppStore();
 
   const [metricas, setMetricas]           = useState({ equipamentos: 0, osAbertas: 0, prevAtrasadas: 0, emManutencao: 0 });
@@ -190,6 +191,17 @@ export default function Painel() {
   return (
     <div style={S.page}>
       <style>{CSS}</style>
+
+      {/* ── Alerta de segurança pós-login ──
+          Exibido aqui porque o PublicOnlyRoute redireciona para /dashboard
+          antes que qualquer modal possa ser renderizado no Login.jsx.
+          A flag showSecurityAlert é setada no Login e limpa aqui ao confirmar. */}
+      {showSecurityAlert && (
+        <SecurityAlertModal
+          nomeUsuario={profile?.nome_completo?.split(' ')[0] ?? 'usuário'}
+          onConfirm={() => setShowSecurityAlert(false)}
+        />
+      )}
 
       {/* ── Header ── */}
       <header style={S.header}>

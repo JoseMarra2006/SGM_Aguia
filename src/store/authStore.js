@@ -54,8 +54,17 @@ const useAuthStore = create(
       // Timestamp da última atividade confirmada — persistido para checar 24h
       lastActivity:       null,
 
+      // Flag que sinaliza para o Painel.jsx exibir o alerta de segurança.
+      // O PublicOnlyRoute redireciona para /dashboard antes que qualquer modal
+      // possa ser renderizado no Login.jsx. Esta flag passa o sinal adiante.
+      // NÃO é persistida — só existe durante a sessão de navegação atual.
+      showSecurityAlert:  false,
+
       // Flag interna de idempotência (não persistida)
       _authInitialized:   false,
+
+      // ─── Controle do alerta de segurança ────────────────────────────────────
+      setShowSecurityAlert: (valor) => set({ showSecurityAlert: valor }),
 
       // ─── Atualiza timestamp de atividade ────────────────────────────────────
       // Chamar sempre que o usuário realizar uma ação significativa.
@@ -140,6 +149,7 @@ const useAuthStore = create(
                 isMecanico:         false,
                 mustChangePassword: false,
                 lastActivity:       null,
+                showSecurityAlert:  false,
               });
             }
           }
@@ -251,6 +261,7 @@ const useAuthStore = create(
           isMecanico:         false,
           mustChangePassword: false,
           lastActivity:       null,
+          showSecurityAlert:  false,
           _authInitialized:   false,
         });
 
@@ -332,11 +343,12 @@ const useAuthStore = create(
       // Chamado assim que o persist termina de ler o localStorage.
       onRehydrateStorage: () => (state) => {
         if (state) {
-          state.isReady          = false;
-          state.isLoading        = false;
-          state.authError        = null;
-          state.session          = null;
-          state._authInitialized = false;
+          state.isReady           = false;
+          state.isLoading         = false;
+          state.authError         = null;
+          state.session           = null;
+          state.showSecurityAlert = false;
+          state._authInitialized  = false;
         }
       },
     }

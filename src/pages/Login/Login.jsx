@@ -33,7 +33,7 @@ function Input({ label, id, error, ...props }) {
 // ─── Modal de alerta de segurança ─────────────────────────────────────────
 // Exibido após login bem-sucedido para lembrar o usuário de deslogar.
 
-function SecurityAlertModal({ nomeUsuario, onConfirm }) {
+export function SecurityAlertModal({ nomeUsuario, onConfirm }) {
   return (
     <div style={styles.modalOverlay}>
       <div style={{ ...styles.modalBox, ...styles.securityBox }}>
@@ -153,7 +153,7 @@ function ChangePasswordModal({ onSuccess }) {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { loginWithCPF, isLoading, authError, clearAuthError, profile } = useAuthStore();
+  const { loginWithCPF, isLoading, authError, clearAuthError, setShowSecurityAlert } = useAuthStore();
 
   const [cpf,   setCPF]   = useState('');
   const [senha, setSenha] = useState('');
@@ -193,8 +193,11 @@ export default function Login() {
         // Primeiro acesso: troca de senha antes do alerta de segurança
         setModalAtivo('changePassword');
       } else {
-        // Login normal: exibe alerta de segurança
-        setModalAtivo('security');
+        // Login normal: sinaliza alerta de segurança e navega para /dashboard.
+        // O alerta será exibido pelo Painel.jsx, pois o PublicOnlyRoute
+        // redireciona para /dashboard antes deste modal poder ser renderizado.
+        setShowSecurityAlert(true);
+        navigate('/dashboard', { replace: true });
       }
     }
     // Se !result.success, authError já foi setado pelo store
@@ -204,19 +207,13 @@ export default function Login() {
     if (e.key === 'Enter') handleLogin();
   };
 
-  // Chamado após o usuário confirmar o alerta de segurança
-  const handleSecurityConfirm = () => {
-    setModalAtivo(null);
+  // Chamado após troca de senha bem-sucedida no primeiro acesso
+  const handlePasswordChanged = () => {
+    // Sinaliza alerta de segurança e navega para o dashboard
+    setShowSecurityAlert(true);
     navigate('/dashboard', { replace: true });
   };
 
-  // Chamado após troca de senha bem-sucedida no primeiro acesso
-  const handlePasswordChanged = () => {
-    // Após trocar a senha, exibe o alerta de segurança antes de entrar
-    setModalAtivo('security');
-  };
-
-  const primeiroNome = profile?.nome_completo?.split(' ')[0] ?? 'usuário';
 
   return (
     <div style={styles.page}>
@@ -303,14 +300,6 @@ export default function Login() {
           </p>
         </div>
       </div>
-
-      {/* Modal de alerta de segurança */}
-      {modalAtivo === 'security' && (
-        <SecurityAlertModal
-          nomeUsuario={primeiroNome}
-          onConfirm={handleSecurityConfirm}
-        />
-      )}
 
       {/* Modal de troca obrigatória de senha (primeiro acesso) */}
       {modalAtivo === 'changePassword' && (
