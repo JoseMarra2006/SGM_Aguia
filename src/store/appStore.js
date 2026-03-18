@@ -12,6 +12,11 @@ import {
   getLastSyncAt,
   setLastSyncAt,
 } from '../services/storage';
+import {
+  fetchNotificacoes,
+  marcarComoLida,
+  marcarTodasComoLidas,
+} from '../services/notifications';
 
 /**
  * appStore — Estado global da aplicação.
@@ -19,17 +24,18 @@ import {
  * Responsabilidades:
  *  1. Status da rede (online/offline)
  *  2. Filas de dados pendentes de sincronização
- *  3. Timers de OS em andamento (início conhecido, duração calculada no cliente)
- *  4. Estado de sincronização (em progresso, último erro, último sucesso)
+ *  3. Timers de OS em andamento
+ *  4. Estado de sincronização
+ *  5. Sistema de notificações (NEW)
  */
 
 const useAppStore = create(
   subscribeWithSelector((set, get) => ({
+
     // ─────────────────────────────────────────
     // ESTADO: Rede
     // ─────────────────────────────────────────
     isOnline: true,
-
     setOnline: (status) => set({ isOnline: status }),
 
     // ─────────────────────────────────────────
@@ -42,10 +48,6 @@ const useAppStore = create(
     /** @type {import('../services/storage').QueueItem[]} */
     osQueue: [],
 
-    /**
-     * Carrega as filas do storage local para a memória.
-     * Deve ser chamado uma vez na inicialização do app (App.jsx).
-     */
     loadQueuesFromStorage: async () => {
       const [checklistQueue, osQueue] = await Promise.all([
         getChecklistQueue(),
@@ -54,10 +56,6 @@ const useAppStore = create(
       set({ checklistQueue, osQueue });
     },
 
-    /**
-     * Adiciona um checklist à fila offline (memória + disco).
-     * @param {import('../services/storage').QueueItem} item
-     */
     addChecklistToQueue: async (item) => {
       await enqueueChecklist(item);
       set((state) => ({
@@ -65,10 +63,6 @@ const useAppStore = create(
       }));
     },
 
-    /**
-     * Adiciona uma OS à fila offline (memória + disco).
-     * @param {import('../services/storage').QueueItem} item
-     */
     addOSToQueue: async (item) => {
       await enqueueOS(item);
       set((state) => ({
@@ -76,10 +70,6 @@ const useAppStore = create(
       }));
     },
 
-    /**
-     * Remove um checklist sincronizado da fila (memória + disco).
-     * @param {string} localId
-     */
     removeChecklistFromQueue: async (localId) => {
       await dequeueChecklist(localId);
       set((state) => ({
@@ -87,10 +77,6 @@ const useAppStore = create(
       }));
     },
 
-    /**
-     * Remove uma OS sincronizada da fila (memória + disco).
-     * @param {string} localId
-     */
     removeOSFromQueue: async (localId) => {
       await dequeueOS(localId);
       set((state) => ({
@@ -98,7 +84,6 @@ const useAppStore = create(
       }));
     },
 
-    /** Retorna total de itens pendentes de sincronização. */
     get pendingCount() {
       const { checklistQueue, osQueue } = get();
       return checklistQueue.length + osQueue.length;
@@ -107,19 +92,17 @@ const useAppStore = create(
     // ─────────────────────────────────────────
     // ESTADO: Sincronização
     // ─────────────────────────────────────────
-    isSyncing: false,
-    lastSyncAt: null,      // Timestamp (ms) da última sync bem-sucedida
-    lastSyncError: null,   // Mensagem do último erro de sync
+    isSyncing:     false,
+    lastSyncAt:    null,
+    lastSyncError: null,
 
-    setSyncing: (status) => set({ isSyncing: status }),
+    setSyncing:  (status)  => set({ isSyncing: status }),
+    setSyncError: (msg)    => set({ lastSyncError: msg, isSyncing: false }),
 
     setSyncSuccess: async () => {
       await setLastSyncAt();
       set({ lastSyncAt: Date.now(), lastSyncError: null, isSyncing: false });
     },
-
-    setSyncError: (message) =>
-      set({ lastSyncError: message, isSyncing: false }),
 
     loadLastSyncAt: async () => {
       const lastSyncAt = await getLastSyncAt();
@@ -128,29 +111,17 @@ const useAppStore = create(
 
     // ─────────────────────────────────────────
     // ESTADO: Timers de OS em andamento
-    // Os timers são rastreados como { [osId]: inicioEmMs }
-    // O tempo decorrido é calculado em runtime: Date.now() - inicioEmMs
-    // O osId é o ID real do Supabase (não o localId).
     // ─────────────────────────────────────────
 
     /** @type {Record<string, number>} */
     activeTimers: {},
 
-    /**
-     * Registra o início de um timer para uma OS.
-     * @param {string} osId       - ID da OS no Supabase
-     * @param {number} inicioEm   - Timestamp de início em ms (vindos do campo inicio_em do servidor)
-     */
     startTimer: (osId, inicioEm) => {
       set((state) => ({
         activeTimers: { ...state.activeTimers, [osId]: inicioEm },
       }));
     },
 
-    /**
-     * Remove o timer de uma OS finalizada.
-     * @param {string} osId
-     */
     stopTimer: (osId) => {
       set((state) => {
         const { [osId]: _, ...rest } = state.activeTimers;
@@ -158,24 +129,12 @@ const useAppStore = create(
       });
     },
 
-    /**
-     * Retorna o tempo decorrido em segundos para uma OS,
-     * ou null se não houver timer ativo.
-     * @param {string} osId
-     * @returns {number|null}
-     */
     getElapsedSeconds: (osId) => {
       const inicio = get().activeTimers[osId];
       if (!inicio) return null;
       return Math.floor((Date.now() - inicio) / 1000);
     },
 
-    /**
-     * Restaura os timers de todas as OS em andamento.
-     * Deve ser chamado no boot do app buscando OS com status 'em_andamento'
-     * do Supabase ou da fila local.
-     * @param {Array<{id: string, inicio_em: string}>} ordensAtivas
-     */
     restoreTimers: (ordensAtivas) => {
       const timers = {};
       for (const os of ordensAtivas) {
@@ -183,6 +142,89 @@ const useAppStore = create(
       }
       set({ activeTimers: timers });
     },
+
+    // ─────────────────────────────────────────
+    // ESTADO: Notificações (NEW)
+    // ─────────────────────────────────────────
+
+    /** @type {object[]}  Lista completa de notificações do usuário logado */
+    notifications: [],
+
+    /** Quantidade de notificações não lidas */
+    unreadCount: 0,
+
+    /** Controla abertura do painel lateral de notificações */
+    notifPanelOpen: false,
+
+    /** true enquanto carrega a lista da primeira vez */
+    notifLoading: false,
+
+    // ─── Ações de Notificações ────────────────
+
+    /** Busca notificações do servidor e atualiza o estado. */
+    loadNotifications: async (userId) => {
+      if (!userId) return;
+      set({ notifLoading: true });
+      try {
+        const data = await fetchNotificacoes(userId, 40);
+        const unread = data.filter((n) => !n.lida).length;
+        set({ notifications: data, unreadCount: unread, notifLoading: false });
+      } catch (err) {
+        console.error('[Notif] Erro ao carregar:', err.message);
+        set({ notifLoading: false });
+      }
+    },
+
+    /**
+     * Adiciona uma notificação recebida via Realtime ao topo da lista.
+     * Chamado pelo subscribeToNotificacoes em Painel.jsx.
+     * @param {object} notif
+     */
+    addNotification: (notif) => {
+      set((state) => ({
+        notifications: [notif, ...state.notifications].slice(0, 40),
+        unreadCount:   state.unreadCount + (notif.lida ? 0 : 1),
+      }));
+    },
+
+    /** Marca uma notificação como lida (localmente + Supabase). */
+    markNotificationRead: async (notifId) => {
+      // Optimistic update
+      set((state) => {
+        const prev    = state.notifications.find((n) => n.id === notifId);
+        const wasRead = prev?.lida ?? true;
+        return {
+          notifications: state.notifications.map((n) =>
+            n.id === notifId ? { ...n, lida: true } : n
+          ),
+          unreadCount: wasRead ? state.unreadCount : Math.max(0, state.unreadCount - 1),
+        };
+      });
+      try {
+        await marcarComoLida(notifId);
+      } catch (err) {
+        console.error('[Notif] Erro ao marcar lida:', err.message);
+      }
+    },
+
+    /** Marca todas como lidas (localmente + Supabase). */
+    markAllNotificationsRead: async (userId) => {
+      set((state) => ({
+        notifications: state.notifications.map((n) => ({ ...n, lida: true })),
+        unreadCount: 0,
+      }));
+      try {
+        await marcarTodasComoLidas(userId);
+      } catch (err) {
+        console.error('[Notif] Erro ao marcar todas lidas:', err.message);
+      }
+    },
+
+    /** Abre / fecha o painel de notificações. */
+    setNotifPanelOpen: (open) => set({ notifPanelOpen: open }),
+
+    /** Limpa todas as notificações do estado (ao fazer logout). */
+    clearNotifications: () => set({ notifications: [], unreadCount: 0, notifPanelOpen: false }),
   }))
 );
 

@@ -1,15 +1,25 @@
 // src/pages/Dashboard/Painel.jsx
-// ALTERAÇÕES VISUAIS:
-//   • AguiaLogo: SVG inline da águia no header (sem dependência de arquivo externo)
-//   • btnLogout: backgroundColor explícito + border mais visível sobre fundo verde
-//   • Todas as cores em verde (#20643F) — mantidas
+// ADIÇÕES:
+//   • Ícone de sino (BellIcon) no header com badge de não-lidas
+//   • Painel lateral de notificações (slide-in da direita)
+//   • Subscription Supabase Realtime para notificações em tempo real
+//   • Query de preventivas corrigida: tecnico:usuarios!mecanico_id
+// MANTIDAS:
+//   • Todas as lógicas de autenticação e AuthStore
+//   • Paleta de cores verde (#20643F)
+//   • AguiaLogo SVG inline
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import useAuthStore from '../../store/authStore';
 import useAppStore from '../../store/appStore';
 import { SecurityAlertModal } from '../Login/Login.jsx';
+import {
+  subscribeToNotificacoes,
+  iconePorTipo,
+  tempoRelativo,
+} from '../../services/notifications';
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -25,6 +35,98 @@ function calcularDuracao(inicio) {
   const h = Math.floor(ms / 3600000);
   const m = Math.floor((ms % 3600000) / 60000);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+// ─── Painel de Notificações ───────────────────────────────────
+
+function PainelNotificacoes({ onClose }) {
+  const navigate   = useNavigate();
+  const { profile } = useAuthStore();
+  const {
+    notifications,
+    unreadCount,
+    notifLoading,
+    markNotificationRead,
+    markAllNotificationsRead,
+  } = useAppStore();
+
+  const handleClick = (notif) => {
+    if (!notif.lida) markNotificationRead(notif.id);
+    if (notif.link) {
+      onClose();
+      navigate(notif.link);
+    }
+  };
+
+  const handleMarcarTodas = () => {
+    if (profile?.id) markAllNotificationsRead(profile.id);
+  };
+
+  return (
+    <>
+      {/* Overlay para fechar clicando fora */}
+      <div style={NS.overlay} onClick={onClose} />
+
+      {/* Painel lateral */}
+      <div style={NS.painel}>
+        {/* Cabeçalho */}
+        <div style={NS.header}>
+          <div style={NS.headerLeft}>
+            <span style={NS.titulo}>Notificações</span>
+            {unreadCount > 0 && (
+              <span style={NS.unreadBadge}>{unreadCount}</span>
+            )}
+          </div>
+          <div style={NS.headerAcoes}>
+            {unreadCount > 0 && (
+              <button onClick={handleMarcarTodas} style={NS.btnMarcarTodas}>
+                Marcar todas como lidas
+              </button>
+            )}
+            <button onClick={onClose} style={NS.btnFechar}>
+              <CloseIcon />
+            </button>
+          </div>
+        </div>
+
+        {/* Lista */}
+        <div style={NS.lista}>
+          {notifLoading ? (
+            <div style={NS.vazio}>
+              <div style={NS.spinner} />
+            </div>
+          ) : notifications.length === 0 ? (
+            <div style={NS.vazio}>
+              <span style={{ fontSize: '36px' }}>🔔</span>
+              <p style={NS.vazioTexto}>Nenhuma notificação ainda.</p>
+            </div>
+          ) : (
+            notifications.map((notif) => (
+              <button
+                key={notif.id}
+                onClick={() => handleClick(notif)}
+                style={{
+                  ...NS.item,
+                  backgroundColor: notif.lida ? '#FFFFFF' : 'rgba(32,100,63,0.04)',
+                  borderLeft: `3px solid ${notif.lida ? '#E8EDF2' : '#20643F'}`,
+                }}
+              >
+                <span style={NS.itemIcone}>{iconePorTipo(notif.tipo)}</span>
+                <div style={NS.itemCorpo}>
+                  <span style={{ ...NS.itemTitulo, fontWeight: notif.lida ? '500' : '700' }}>
+                    {notif.titulo}
+                  </span>
+                  <span style={NS.itemMsg}>{notif.mensagem}</span>
+                  <span style={NS.itemTempo}>{tempoRelativo(notif.created_at)}</span>
+                </div>
+                {!notif.lida && <span style={NS.dotNaoLida} />}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </>
+  );
 }
 
 // ─── Card de Métrica ──────────────────────────────────────────
@@ -91,7 +193,8 @@ function ItemPrevAtrasada({ ag, onClick }) {
         <span style={S.osEquip}>{ag.equipamentos?.nome ?? '—'}</span>
         <span style={S.osProblema}>Preventiva não realizada</span>
         <div style={S.osMeta}>
-          <span style={S.osMetaItem}><UserSmIcon /> {ag.usuarios?.nome_completo ?? '—'}</span>
+          {/* CORREÇÃO: usa `tecnico` em vez de `usuarios` */}
+          <span style={S.osMetaItem}><UserSmIcon /> {ag.tecnico?.nome_completo ?? '—'}</span>
           <span style={S.osMetaDot} />
           <span style={{ ...S.osMetaItem, color: '#EF4444', fontWeight: '600' }}>
             {diasAtraso === 0 ? 'Hoje' : `${diasAtraso}d de atraso`}
@@ -108,13 +211,43 @@ function ItemPrevAtrasada({ ag, onClick }) {
 export default function Painel() {
   const navigate = useNavigate();
   const { profile, isSuperAdmin, logout, showSecurityAlert, setShowSecurityAlert } = useAuthStore();
-  const { isOnline, checklistQueue, osQueue } = useAppStore();
+  const {
+    isOnline, checklistQueue, osQueue,
+    notifications, unreadCount, notifPanelOpen,
+    loadNotifications, addNotification, setNotifPanelOpen,
+    clearNotifications,
+  } = useAppStore();
 
   const [metricas, setMetricas]           = useState({ equipamentos: 0, osAbertas: 0, prevAtrasadas: 0, emManutencao: 0 });
   const [osAtivas, setOsAtivas]           = useState([]);
   const [prevAtrasadas, setPrevAtrasadas] = useState([]);
   const [loadingMetricas, setLoadingMetricas] = useState(true);
   const [loadingListas, setLoadingListas]     = useState(true);
+
+  const unsubNotifRef = useRef(null);
+
+  // ─── Carrega notificações + assina Realtime ──────────────────
+  useEffect(() => {
+    if (!profile?.id) return;
+
+    loadNotifications(profile.id);
+
+    // Subscription Supabase Realtime
+    unsubNotifRef.current = subscribeToNotificacoes(profile.id, (notif) => {
+      addNotification(notif);
+    });
+
+    return () => {
+      if (unsubNotifRef.current) unsubNotifRef.current();
+    };
+  }, [profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Limpa notificações ao desmontar (ex: logout via outro componente)
+  useEffect(() => {
+    return () => {
+      if (unsubNotifRef.current) unsubNotifRef.current();
+    };
+  }, []);
 
   // ─── Busca métricas ───────────────────────────────────────────
   useEffect(() => {
@@ -164,9 +297,10 @@ export default function Painel() {
           .limit(5);
         if (!isSuperAdmin) qOS = qOS.eq('mecanico_id', profile.id);
 
+        // CORREÇÃO: relação explícita para preventivas
         let qPrev = supabase
           .from('agendamentos_preventivos')
-          .select(`id, data_agendada, equipamentos(nome), usuarios(nome_completo)`)
+          .select(`id, data_agendada, equipamentos(nome), tecnico:usuarios!mecanico_id(nome_completo)`)
           .eq('status', 'pendente')
           .lt('data_agendada', hoje)
           .order('data_agendada', { ascending: true })
@@ -183,9 +317,14 @@ export default function Painel() {
       }
     }
     fetchListas();
-  }, [isSuperAdmin, profile?.id]);
+  }, [isSuperAdmin, profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pendentesSync = checklistQueue.length + osQueue.length;
+
+  const handleLogout = async () => {
+    clearNotifications();
+    logout();
+  };
 
   return (
     <div style={S.page}>
@@ -198,10 +337,14 @@ export default function Painel() {
         />
       )}
 
-      {/* ── Header — fundo #20643F ── */}
+      {/* ── Painel de Notificações (renderizado sobre tudo) ── */}
+      {notifPanelOpen && (
+        <PainelNotificacoes onClose={() => setNotifPanelOpen(false)} />
+      )}
+
+      {/* ── Header ── */}
       <header style={S.header}>
         <div style={S.headerInner}>
-          {/* Logo SGM Águia — SVG inline para não depender de arquivo externo */}
           <div style={S.logoMark}>
             <AguiaLogo />
           </div>
@@ -215,7 +358,23 @@ export default function Painel() {
                 <OfflineIcon /> Offline
               </div>
             )}
-            <button onClick={logout} style={S.btnLogout} title="Sair">
+
+            {/* ── Sino de Notificações ── */}
+            <button
+              onClick={() => setNotifPanelOpen(true)}
+              style={S.btnSino}
+              title="Notificações"
+              aria-label={`Notificações${unreadCount > 0 ? ` (${unreadCount} não lidas)` : ''}`}
+            >
+              <BellNavIcon />
+              {unreadCount > 0 && (
+                <span style={S.sinoBadge}>
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            <button onClick={handleLogout} style={S.btnLogout} title="Sair">
               <LogoutIcon />
             </button>
           </div>
@@ -236,48 +395,30 @@ export default function Painel() {
           <p style={S.sectionLabel}>Visão geral</p>
           <div style={S.metricasGrid}>
             <CardMetrica
-              index={0}
-              label="Equipamentos"
-              valor={metricas.equipamentos}
-              cor="#20643F"
-              bg="rgba(32,100,63,0.08)"
-              borda="rgba(32,100,63,0.2)"
-              icone={<GearMetIcon />}
-              onClick={() => navigate('/equipamentos')}
-              loading={loadingMetricas}
+              index={0} label="Equipamentos" valor={metricas.equipamentos}
+              cor="#20643F" bg="rgba(32,100,63,0.08)" borda="rgba(32,100,63,0.2)"
+              icone={<GearMetIcon />} onClick={() => navigate('/equipamentos')} loading={loadingMetricas}
             />
             <CardMetrica
-              index={1}
-              label="Em manutenção"
-              valor={metricas.emManutencao}
-              cor="#F59E0B"
-              bg="rgba(245,158,11,0.08)"
-              borda="rgba(245,158,11,0.2)"
-              icone={<WrenchMetIcon />}
-              onClick={() => navigate('/equipamentos')}
-              loading={loadingMetricas}
+              index={1} label="Em manutenção" valor={metricas.emManutencao}
+              cor="#F59E0B" bg="rgba(245,158,11,0.08)" borda="rgba(245,158,11,0.2)"
+              icone={<WrenchMetIcon />} onClick={() => navigate('/equipamentos')} loading={loadingMetricas}
             />
             <CardMetrica
-              index={2}
-              label="OS abertas"
-              valor={metricas.osAbertas}
+              index={2} label="OS abertas" valor={metricas.osAbertas}
               cor={metricas.osAbertas > 0 ? '#EF4444' : '#10B981'}
               bg={metricas.osAbertas > 0 ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.08)'}
               borda={metricas.osAbertas > 0 ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'}
               icone={<OSMetIcon ativa={metricas.osAbertas > 0} />}
-              onClick={() => navigate('/corretivas')}
-              loading={loadingMetricas}
+              onClick={() => navigate('/corretivas')} loading={loadingMetricas}
             />
             <CardMetrica
-              index={3}
-              label="Prev. atrasadas"
-              valor={metricas.prevAtrasadas}
+              index={3} label="Prev. atrasadas" valor={metricas.prevAtrasadas}
               cor={metricas.prevAtrasadas > 0 ? '#EF4444' : '#10B981'}
               bg={metricas.prevAtrasadas > 0 ? 'rgba(239,68,68,0.08)' : 'rgba(16,185,129,0.08)'}
               borda={metricas.prevAtrasadas > 0 ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)'}
               icone={<CalMetIcon atrasada={metricas.prevAtrasadas > 0} />}
-              onClick={() => navigate('/preventivas')}
-              loading={loadingMetricas}
+              onClick={() => navigate('/preventivas')} loading={loadingMetricas}
             />
           </div>
         </section>
@@ -293,11 +434,8 @@ export default function Painel() {
                 { label: 'Usuários',     icon: <UserAcaoIcon />, rota: '/dashboard/usuarios' },
                 { label: 'Estoque',      icon: <BoxAcaoIcon />,  rota: '/dashboard/pecas' },
               ].map((a, i) => (
-                <button
-                  key={a.rota}
-                  onClick={() => navigate(a.rota)}
-                  style={{ ...S.acaoBtn, animationDelay: `${i * 60}ms` }}
-                >
+                <button key={a.rota} onClick={() => navigate(a.rota)}
+                  style={{ ...S.acaoBtn, animationDelay: `${i * 60}ms` }}>
                   <div style={S.acaoIcone}>{a.icon}</div>
                   <span style={S.acaoLabel}>{a.label}</span>
                 </button>
@@ -319,11 +457,7 @@ export default function Painel() {
           ) : (
             <div style={S.listaCard}>
               {osAtivas.map((os) => (
-                <ItemOSAtiva
-                  key={os.id}
-                  os={os}
-                  onClick={() => navigate(`/corretivas/${os.id}`)}
-                />
+                <ItemOSAtiva key={os.id} os={os} onClick={() => navigate(`/corretivas/${os.id}`)} />
               ))}
             </div>
           )}
@@ -343,8 +477,7 @@ export default function Painel() {
             <div style={S.listaCard}>
               {prevAtrasadas.map((ag) => (
                 <ItemPrevAtrasada
-                  key={ag.id}
-                  ag={ag}
+                  key={ag.id} ag={ag}
                   onClick={() => navigate(`/preventivas/${ag.id}/checklist`)}
                 />
               ))}
@@ -364,11 +497,8 @@ export default function Painel() {
         ].map((item) => {
           const ativo = location.pathname === item.rota;
           return (
-            <button
-              key={item.rota}
-              onClick={() => navigate(item.rota)}
-              style={{ ...S.navItem, ...(ativo ? S.navItemAtivo : {}) }}
-            >
+            <button key={item.rota} onClick={() => navigate(item.rota)}
+              style={{ ...S.navItem, ...(ativo ? S.navItemAtivo : {}) }}>
               {item.icon}
               <span style={S.navLabel}>{item.label}</span>
             </button>
@@ -404,18 +534,13 @@ function EmptyLista({ icone, texto }) {
   );
 }
 
-// ─── Logo SGM Águia (inline SVG — sem dependência de arquivo externo) ────
-// Águia estilizada: círculo âmbar + asas verdes + texto "SGM" implícito na forma
+// ─── Logo SGM Águia ───────────────────────────────────────────
 function AguiaLogo() {
   return (
     <svg width="40" height="40" viewBox="0 0 48 48" fill="none" aria-label="SGM Águia">
-      {/* Fundo arredondado semitransparente */}
       <rect width="48" height="48" rx="10" fill="rgba(255,255,255,0.18)"/>
-      {/* Corpo da águia — forma de casa/prédio estilizado representando a empresa */}
       <path d="M14 34V22l10-8 10 8v12H28v-8h-8v8H14z" fill="white"/>
-      {/* Olho âmbar — símbolo da águia */}
       <circle cx="24" cy="18" r="3" fill="#F59E0B"/>
-      {/* Asas laterais */}
       <path d="M10 26 Q6 22 10 18 L14 22" fill="rgba(255,255,255,0.55)"/>
       <path d="M38 26 Q42 22 38 18 L34 22" fill="rgba(255,255,255,0.55)"/>
     </svg>
@@ -423,9 +548,11 @@ function AguiaLogo() {
 }
 
 // ─── Ícones ───────────────────────────────────────────────────
+function CloseIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
 function ChevronIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ color: '#CBD5E1', flexShrink: 0 }}><path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
 function UserSmIcon() { return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="4" stroke="#94A3B8" strokeWidth="2"/></svg>; }
 function TimerSmIcon() { return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="10" stroke="#94A3B8" strokeWidth="2"/><path d="M12 6v6l4 2" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round"/></svg>; }
+function BellNavIcon() { return <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
 function GearMetIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="#20643F" strokeWidth="1.8"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#20643F" strokeWidth="1.8"/></svg>; }
 function WrenchMetIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round"/></svg>; }
 function OSMetIcon({ ativa }) { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke={ativa ? '#EF4444' : '#10B981'} strokeWidth="2"/><path d="M14 2v6h6M12 18v-6M9 15h6" stroke={ativa ? '#EF4444' : '#10B981'} strokeWidth="2" strokeLinecap="round"/></svg>; }
@@ -442,25 +569,113 @@ function GearNavIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" 
 function CalNavIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
 function OSNavIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" strokeWidth="2"/><path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
 
-// ─── CSS e Estilos ────────────────────────────────────────────
+// ─── CSS Global ───────────────────────────────────────────────
 const CSS = `
-  @keyframes cardFadeIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
-  @keyframes shimmer    { 0% { background-position:-400px 0; } 100% { background-position:400px 0; } }
+  @keyframes cardFadeIn  { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes shimmer     { 0% { background-position:-400px 0; } 100% { background-position:400px 0; } }
+  @keyframes slideInRight { from { transform:translateX(100%); opacity:0; } to { transform:translateX(0); opacity:1; } }
 `;
+
+// ─── Estilos do Painel de Notificações ────────────────────────
+const NS = {
+  overlay: {
+    position: 'fixed', inset: 0, zIndex: 40,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    backdropFilter: 'blur(2px)',
+  },
+  painel: {
+    position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 50,
+    width: 'min(380px, 100vw)',
+    backgroundColor: '#FFFFFF',
+    display: 'flex', flexDirection: 'column',
+    boxShadow: '-8px 0 32px rgba(0,0,0,0.15)',
+    animation: 'slideInRight 0.25s ease both',
+  },
+  header: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '16px 16px 12px',
+    borderBottom: '1px solid #E8EDF2',
+    gap: '8px',
+    flexShrink: 0,
+  },
+  headerLeft: { display: 'flex', alignItems: 'center', gap: '8px' },
+  titulo: { fontSize: '16px', fontWeight: '800', color: '#0D1B2A', letterSpacing: '-0.2px' },
+  unreadBadge: {
+    padding: '2px 8px', borderRadius: '20px',
+    backgroundColor: '#20643F', color: '#FFFFFF',
+    fontSize: '11px', fontWeight: '700',
+  },
+  headerAcoes: { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
+  btnMarcarTodas: {
+    padding: '5px 10px', borderRadius: '7px', border: '1.5px solid #E2E8F0',
+    backgroundColor: '#F8FAFC', color: '#64748B',
+    fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit',
+  },
+  btnFechar: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    width: '30px', height: '30px', border: '1px solid #E2E8F0',
+    borderRadius: '7px', background: '#F8FAFC', cursor: 'pointer', color: '#64748B',
+  },
+  lista: { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' },
+  vazio: {
+    flex: 1, display: 'flex', flexDirection: 'column',
+    alignItems: 'center', justifyContent: 'center', gap: '12px', padding: '40px',
+  },
+  vazioTexto: { margin: 0, fontSize: '14px', color: '#94A3B8', fontWeight: '500' },
+  spinner: {
+    width: '24px', height: '24px',
+    border: '3px solid #E8EDF2', borderTopColor: '#20643F',
+    borderRadius: '50%', animation: 'shimmer 1s linear infinite',
+  },
+  item: {
+    width: '100%', display: 'flex', alignItems: 'flex-start', gap: '12px',
+    padding: '14px 16px', border: 'none', borderBottom: '1px solid #F1F5F9',
+    cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
+    transition: 'background-color 0.15s',
+  },
+  itemIcone: { fontSize: '18px', flexShrink: 0, marginTop: '1px' },
+  itemCorpo: { flex: 1, display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 },
+  itemTitulo: { fontSize: '13px', color: '#0D1B2A', lineHeight: 1.4 },
+  itemMsg: {
+    fontSize: '12px', color: '#64748B', lineHeight: 1.45,
+    overflow: 'hidden', textOverflow: 'ellipsis',
+    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+  },
+  itemTempo: { fontSize: '11px', color: '#94A3B8', fontWeight: '500' },
+  dotNaoLida: {
+    width: '8px', height: '8px', borderRadius: '50%',
+    backgroundColor: '#20643F', flexShrink: 0, marginTop: '5px',
+  },
+};
+
+// ─── Estilos do Painel principal ──────────────────────────────
 const S = {
   page: { minHeight: '100dvh', backgroundColor: '#F4F7FA', fontFamily: "'DM Sans','Segoe UI',sans-serif", paddingBottom: '72px' },
   header: { backgroundColor: '#20643F', position: 'sticky', top: 0, zIndex: 20 },
   headerInner: { display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px' },
-
-  // RESPONSIVIDADE: flexShrink:0 + overflow:hidden para logo não vazar em telas pequenas
   logoMark: { flexShrink: 0, display: 'flex', alignItems: 'center' },
-
   headerTextos: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
   headerSub: { fontSize: '10px', color: 'rgba(255,255,255,0.6)', fontWeight: '600', letterSpacing: '1px', textTransform: 'uppercase' },
   headerNome: { fontSize: '16px', color: '#FFFFFF', fontWeight: '700', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   headerAcoes: { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
   offlinePill: { display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '20px', fontSize: '11px', color: '#FFFFFF', fontWeight: '600' },
-  // CORRIGIDO: backgroundColor explícito + border mais visível para garantir contraste sobre fundo verde
+  // Botão sino
+  btnSino: {
+    position: 'relative',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    width: '36px', height: '36px',
+    border: '1.5px solid rgba(255,255,255,0.5)',
+    borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)',
+    cursor: 'pointer', color: '#FFFFFF',
+  },
+  sinoBadge: {
+    position: 'absolute', top: '-5px', right: '-5px',
+    minWidth: '17px', height: '17px', padding: '0 4px',
+    borderRadius: '10px', backgroundColor: '#EF4444',
+    color: '#FFFFFF', fontSize: '10px', fontWeight: '800',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    border: '2px solid #20643F',
+  },
   btnLogout: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: '1.5px solid rgba(255,255,255,0.5)', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)', cursor: 'pointer', color: '#FFFFFF' },
   syncBanner: { display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 16px', backgroundColor: 'rgba(245,158,11,0.2)', borderTop: '1px solid rgba(245,158,11,0.3)', fontSize: '12px', color: '#FEF3C7', fontWeight: '500' },
   main: { padding: '16px', display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '640px', margin: '0 auto', width: '100%', boxSizing: 'border-box' },
