@@ -1,7 +1,8 @@
 // src/pages/Corretivas/Listagem.jsx
-// ALTERAÇÕES VISUAIS:
-//   • #0F4C81 → #20643F em: eyebrow, btnNova, contadorNum 'Em andamento',
-//     filtroBtnAtivo, btnRetry e STATUS_CONFIG.em_andamento (cor/bg/borda/barraEsq)
+// v2:
+//   • Query inclui `atualizado_em` para exibir "Atualizado há X" no card
+//   • CardOS mostra timestamp de última atualização quando concluída/cancelada
+//   • STATUS_CONFIG.em_andamento mantido em #20643F
 
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -24,7 +25,18 @@ function calcularDuracao(inicio, fim) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-// ALTERADO: em_andamento cor/bg/borda/barraEsq #0F4C81 → #20643F / rgba(32,100,63,…)
+function tempoRelativo(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - new Date(ts).getTime();
+  const min  = Math.floor(diff / 60000);
+  const h    = Math.floor(diff / 3600000);
+  const d    = Math.floor(diff / 86400000);
+  if (min < 1)  return 'agora mesmo';
+  if (min < 60) return `há ${min} min`;
+  if (h < 24)   return `há ${h}h`;
+  return `há ${d}d`;
+}
+
 const STATUS_CONFIG = {
   em_andamento: { label: 'Em andamento', cor: '#20643F', bg: 'rgba(32,100,63,0.1)', borda: 'rgba(32,100,63,0.25)', barraEsq: '#20643F' },
   concluida:    { label: 'Concluída',    cor: '#10B981', bg: 'rgba(16,185,129,0.1)', borda: 'rgba(16,185,129,0.25)', barraEsq: '#10B981' },
@@ -43,6 +55,7 @@ const FILTROS = [
 function CardOS({ os, index, onClick }) {
   const cfg = STATUS_CONFIG[os.status] ?? STATUS_CONFIG.em_andamento;
   const duracao = calcularDuracao(os.inicio_em, os.fim_em);
+  const isFinalizada = os.status !== 'em_andamento';
 
   return (
     <article
@@ -79,10 +92,15 @@ function CardOS({ os, index, onClick }) {
         )}
       </div>
 
-      {/* Mecânico */}
+      {/* Linha 4: Mecânico + última atualização */}
       <div style={S.mecRow}>
         <MecIcon />
         <span style={S.mecNome}>{os.usuarios?.nome_completo ?? '—'}</span>
+        {isFinalizada && os.atualizado_em && (
+          <span style={S.atualizadoTag}>
+            Atualizado {tempoRelativo(os.atualizado_em)}
+          </span>
+        )}
         <ChevronIcon />
       </div>
     </article>
@@ -108,7 +126,7 @@ export default function ListagemCorretivas() {
       let query = supabase
         .from('ordens_servico')
         .select(`
-          id, problema, solicitante, status, inicio_em, fim_em,
+          id, problema, solicitante, status, inicio_em, fim_em, atualizado_em,
           equipamentos ( id, nome ),
           usuarios     ( id, nome_completo )
         `)
@@ -147,11 +165,9 @@ export default function ListagemCorretivas() {
       <header style={S.header}>
         <div style={S.headerTop}>
           <div>
-            {/* ALTERADO: color #0F4C81 → #20643F */}
             <p style={S.eyebrow}>Módulo 3</p>
             <h1 style={S.pageTitle}>Ordens de Serviço</h1>
           </div>
-          {/* ALTERADO: backgroundColor #0F4C81 → #20643F */}
           <button onClick={() => navigate('/corretivas/nova')} style={S.btnNova}>
             <PlusIcon /> Nova OS
           </button>
@@ -160,7 +176,6 @@ export default function ListagemCorretivas() {
         {/* Contadores */}
         <div style={S.contadoresRow}>
           <div style={S.contador}>
-            {/* ALTERADO: color #0F4C81 → #20643F */}
             <span style={{ ...S.contadorNum, color: '#20643F' }}>{contadores.em_andamento}</span>
             <span style={S.contadorLabel}>Em andamento</span>
           </div>
@@ -255,40 +270,37 @@ const CSS = `
   @keyframes shimmer    { 0% { background-position:-400px 0; } 100% { background-position:400px 0; } }
 `;
 const S = {
-  page: { minHeight: '100dvh', backgroundColor: '#F4F7FA', fontFamily: "'DM Sans','Segoe UI',sans-serif" },
-  header: { backgroundColor: '#FFFFFF', padding: '24px 20px 0', borderBottom: '1px solid #E8EDF2', position: 'sticky', top: 0, zIndex: 10 },
-  headerTop: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px' },
-  // ALTERADO: color #0F4C81 → #20643F
-  eyebrow: { margin: '0 0 2px', fontSize: '11px', fontWeight: '600', letterSpacing: '1.2px', textTransform: 'uppercase', color: '#20643F' },
-  pageTitle: { margin: 0, fontSize: '26px', fontWeight: '800', color: '#0D1B2A', letterSpacing: '-0.5px' },
-  // ALTERADO: backgroundColor #0F4C81 → #20643F
-  btnNova: { display: 'flex', alignItems: 'center', padding: '10px 18px', backgroundColor: '#20643F', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 },
+  page:          { minHeight: '100dvh', backgroundColor: '#F4F7FA', fontFamily: "'DM Sans','Segoe UI',sans-serif" },
+  header:        { backgroundColor: '#FFFFFF', padding: '24px 20px 0', borderBottom: '1px solid #E8EDF2', position: 'sticky', top: 0, zIndex: 10 },
+  headerTop:     { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px' },
+  eyebrow:       { margin: '0 0 2px', fontSize: '11px', fontWeight: '600', letterSpacing: '1.2px', textTransform: 'uppercase', color: '#20643F' },
+  pageTitle:     { margin: 0, fontSize: '26px', fontWeight: '800', color: '#0D1B2A', letterSpacing: '-0.5px' },
+  btnNova:       { display: 'flex', alignItems: 'center', padding: '10px 18px', backgroundColor: '#20643F', color: '#FFFFFF', border: 'none', borderRadius: '10px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 },
   contadoresRow: { display: 'flex', alignItems: 'center', gap: '0', marginBottom: '16px', backgroundColor: '#F8FAFC', border: '1px solid #E8EDF2', borderRadius: '10px', padding: '12px 0', overflow: 'hidden' },
-  contador: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' },
-  contadorNum: { fontSize: '22px', fontWeight: '800', letterSpacing: '-0.5px' },
+  contador:      { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' },
+  contadorNum:   { fontSize: '22px', fontWeight: '800', letterSpacing: '-0.5px' },
   contadorLabel: { fontSize: '10px', color: '#94A3B8', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.4px', textAlign: 'center' },
-  contadorDiv: { width: '1px', backgroundColor: '#E8EDF2', alignSelf: 'stretch' },
-  filtrosRow: { display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '12px', scrollbarWidth: 'none' },
-  filtroBtn: { padding: '6px 14px', borderRadius: '20px', border: '1.5px solid #E2E8F0', backgroundColor: '#FFFFFF', fontSize: '12px', fontWeight: '600', color: '#64748B', cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit', flexShrink: 0 },
-  // ALTERADO: backgroundColor/borderColor #0F4C81 → #20643F
-  filtroBtnAtivo: { backgroundColor: '#20643F', borderColor: '#20643F', color: '#FFFFFF' },
-  main: { padding: '16px' },
-  lista: { display: 'flex', flexDirection: 'column', gap: '10px' },
-  card: { backgroundColor: '#FFFFFF', borderRadius: '12px', border: '1px solid #E8EDF2', padding: '16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '8px', animation: 'cardFadeIn 0.3s ease both', WebkitTapHighlightColor: 'transparent', outline: 'none', minWidth: 0 },
-  cardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' },
-  equipRow: { display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', minWidth: 0 },
-  equipNome: { fontSize: '15px', fontWeight: '700', color: '#0D1B2A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  statusPill: { padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '700', flexShrink: 0 },
+  contadorDiv:   { width: '1px', backgroundColor: '#E8EDF2', alignSelf: 'stretch' },
+  filtrosRow:    { display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '12px', scrollbarWidth: 'none' },
+  filtroBtn:     { padding: '6px 14px', borderRadius: '20px', border: '1.5px solid #E2E8F0', backgroundColor: '#FFFFFF', fontSize: '12px', fontWeight: '600', color: '#64748B', cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit', flexShrink: 0 },
+  filtroBtnAtivo:{ backgroundColor: '#20643F', borderColor: '#20643F', color: '#FFFFFF' },
+  main:          { padding: '16px' },
+  lista:         { display: 'flex', flexDirection: 'column', gap: '10px' },
+  card:          { backgroundColor: '#FFFFFF', borderRadius: '12px', border: '1px solid #E8EDF2', padding: '16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '8px', animation: 'cardFadeIn 0.3s ease both', WebkitTapHighlightColor: 'transparent', outline: 'none', minWidth: 0 },
+  cardTop:       { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' },
+  equipRow:      { display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', minWidth: 0 },
+  equipNome:     { fontSize: '15px', fontWeight: '700', color: '#0D1B2A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  statusPill:    { padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '700', flexShrink: 0 },
   problemaTexto: { margin: 0, fontSize: '13px', color: '#475569', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' },
-  cardBot: { display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' },
-  metaItem: { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#94A3B8' },
-  metaDot: { width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#CBD5E1' },
-  mecRow: { display: 'flex', alignItems: 'center', gap: '5px', paddingTop: '6px', borderTop: '1px solid #F1F5F9' },
-  mecNome: { fontSize: '12px', color: '#64748B', fontWeight: '500' },
-  estadoVazio: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 24px', gap: '12px', textAlign: 'center' },
-  estadoTexto: { margin: 0, fontSize: '15px', color: '#64748B', fontWeight: '500' },
-  // ALTERADO: backgroundColor #0F4C81 → #20643F
-  btnRetry: { padding: '10px 20px', backgroundColor: '#20643F', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
-  skeleton: { backgroundColor: '#FFFFFF', borderRadius: '12px', border: '1px solid #E8EDF2', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' },
-  skeletonLine: { height: '14px', borderRadius: '6px', background: 'linear-gradient(90deg,#F0F4F8 25%,#E8EDF2 50%,#F0F4F8 75%)', backgroundSize: '400px 100%', animation: 'shimmer 1.4s infinite linear' },
+  cardBot:       { display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' },
+  metaItem:      { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#94A3B8' },
+  metaDot:       { width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#CBD5E1' },
+  mecRow:        { display: 'flex', alignItems: 'center', gap: '5px', paddingTop: '6px', borderTop: '1px solid #F1F5F9' },
+  mecNome:       { fontSize: '12px', color: '#64748B', fontWeight: '500' },
+  atualizadoTag: { marginLeft: 'auto', fontSize: '10px', color: '#94A3B8', fontWeight: '500', marginRight: 4 },
+  estadoVazio:   { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 24px', gap: '12px', textAlign: 'center' },
+  estadoTexto:   { margin: 0, fontSize: '15px', color: '#64748B', fontWeight: '500' },
+  btnRetry:      { padding: '10px 20px', backgroundColor: '#20643F', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
+  skeleton:      { backgroundColor: '#FFFFFF', borderRadius: '12px', border: '1px solid #E8EDF2', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' },
+  skeletonLine:  { height: '14px', borderRadius: '6px', background: 'linear-gradient(90deg,#F0F4F8 25%,#E8EDF2 50%,#F0F4F8 75%)', backgroundSize: '400px 100%', animation: 'shimmer 1.4s infinite linear' },
 };
