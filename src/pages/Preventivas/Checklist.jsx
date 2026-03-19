@@ -1,17 +1,17 @@
 // src/pages/Preventivas/Checklist.jsx
-// CORREÇÕES v4 → v5:
-//   [FIX-A] finalizar() online: DELETE respostas existentes antes do INSERT
-//           → elimina erro de constraint em tentativas repetidas sem precisar
-//              de upsert/onConflict (cada checklist tem ID único, mas pode ter
-//              respostas parciais de tentativa anterior).
-//   [FIX-B] finalizar() online: setAg({ status:'concluido' }) explícito ANTES
-//           de setFase('concluido') — garante que jaConcluido=true imediatamente,
-//           sem depender de round-trip ao servidor.
-//   [FIX-C] notificarAdminsInicio(): nova função fire-and-forget chamada no
-//           final de iniciar() — notifica admins que a preventiva foi iniciada.
-//   [FIX-D] notificarAdmins() no finalizar(): reforçado com mensagem clara de
-//           conclusão, chamado logo após o sucesso do banco.
-// INALTERADO: cores, layout, responsividade, lógica de autenticação, offline.
+// CORREÇÃO v5 → v6:
+//   [FIX-RLS-1] Auto-healing: removida chamada direta a agendamentos_preventivos.
+//               O banco já está correto via trigger fn_auto_concluir_agendamento.
+//               Apenas sincroniza o estado local.
+//   [FIX-RLS-2] iniciar(): removida chamada direta a agendamentos_preventivos.
+//               O trigger fn_auto_status_agendamento_por_insert (SECURITY DEFINER)
+//               marca 'em_andamento' atomicamente ao inserir o checklist.
+//   [FIX-RLS-3] finalizar() — online: removido Passo 1 (update de agendamentos).
+//               O trigger fn_auto_concluir_agendamento (SECURITY DEFINER) atualiza
+//               'concluido' ao gravar checklists.fim_em — que é a operação crítica.
+//               A chamada anterior falhava silenciosamente (RLS bloqueava o update
+//               do mecânico sem lançar erro, retornando 0 rows).
+// INALTERADO: cores, layout, responsividade, lógica offline, notificações.
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -267,9 +267,15 @@ export default function Checklist() {
         if (e1) throw e1;
 
         // ── Auto-healing ──────────────────────────────────────────────────────
-        // Se existe um checklist com fim_em preenchido (concluído) mas o
-        // agendamento ainda está como pendente/em_andamento (falha parcial
-        // anterior), corrige o status silenciosamente antes de continuar.
+        // Verifica se existe checklist finalizado cujo status ainda não
+        // foi propagado ao agendamento (ex.: falha parcial anterior ao fix).
+        // Com os triggers SECURITY DEFINER instalados, este cenário não
+        // ocorrerá mais. Mantido como rede de segurança para dados históricos.
+        //
+        // [FIX-RLS-1]: A chamada direta ao agendamentos_preventivos.update()
+        // foi REMOVIDA — ela era bloqueada silenciosamente pela política RLS
+        // "agend_update_superadmin". O DB já estará correto via trigger
+        // fn_auto_concluir_agendamento. Apenas sincronizamos o estado local.
         let agd = agdRaw;
         if (agd.status !== 'concluido') {
           const { data: chkFinalizado } = await supabase
@@ -280,10 +286,8 @@ export default function Checklist() {
             .maybeSingle();
 
           if (chkFinalizado) {
-            await supabase
-              .from('agendamentos_preventivos')
-              .update({ status: 'concluido' })
-              .eq('id', agendamentoId);
+            // Trigger fn_auto_concluir_agendamento já corrigiu o DB.
+            // Apenas alinha o estado local para evitar re-exibição do formulário.
             agd = { ...agd, status: 'concluido' };
           }
         }
@@ -394,8 +398,7 @@ export default function Checklist() {
     return Object.keys(payload).length > 0 ? JSON.stringify(payload) : null;
   }
 
-  // ─── [FIX-C] Notifica admins ao INICIAR preventiva ───────
-  // Fire-and-forget: falha interna não propaga para o fluxo principal.
+  // ─── Notifica admins ao INICIAR preventiva ────────────────
   const notificarAdminsInicio = async () => {
     try {
       const { data: admins } = await supabase
@@ -423,8 +426,7 @@ export default function Checklist() {
     }
   };
 
-  // ─── [FIX-D] Notifica admins ao CONCLUIR preventiva ──────
-  // Fire-and-forget: falha interna não propaga para o fluxo principal.
+  // ─── Notifica admins ao CONCLUIR preventiva ───────────────
   const notificarAdmins = async () => {
     try {
       const { data: admins } = await supabase
@@ -467,31 +469,32 @@ export default function Checklist() {
       if (!isOnline) {
         inicioRef.current = Date.now();
         setChkId(`offline-${crypto.randomUUID()}`);
-        // [FIX-1] Atualiza ag local → impede que o botão reapareça
         setAg(prev => prev ? { ...prev, status: 'em_andamento' } : prev);
         setFase('execucao');
         setSalvando(false);
         return;
       }
+
       const { data, error } = await supabase
         .from('checklists')
         .insert({ agendamento_id: agendamentoId, mecanico_id: profile.id })
         .select('id, inicio_em')
         .single();
       if (error) throw error;
+
       setChkId(data.id);
       inicioRef.current = new Date(data.inicio_em).getTime();
 
-      // Marca agendamento como 'em_andamento' no banco e localmente
-      await supabase
-        .from('agendamentos_preventivos')
-        .update({ status: 'em_andamento' })
-        .eq('id', agendamentoId);
+      // [FIX-RLS-2]: A chamada direta agendamentos_preventivos.update({ status:'em_andamento' })
+      // foi REMOVIDA — era silenciosamente bloqueada pela política RLS "agend_update_superadmin".
+      // O trigger fn_auto_status_agendamento_por_insert (SECURITY DEFINER) já marcou
+      // 'em_andamento' atomicamente ao inserir o checklist acima.
+      // Apenas sincronizamos o estado local para feedback imediato na UI.
       setAg(prev => prev ? { ...prev, status: 'em_andamento' } : prev);
 
       setFase('execucao');
 
-      // [FIX-C] Notifica admins que a preventiva foi iniciada (fire-and-forget)
+      // Notifica admins que a preventiva foi iniciada (fire-and-forget)
       notificarAdminsInicio();
 
     } catch (e) {
@@ -504,13 +507,23 @@ export default function Checklist() {
 
   // ─── Finalizar checklist ─────────────────────────────────
   //
-  // ORDEM CRÍTICA DE OPERAÇÕES:
-  //   1. Marcar agendamento como 'concluido' → PRIORITÁRIO.
-  //   2. Atualizar fim_em no registro do checklist.
-  //   3. [FIX-A] Deletar respostas anteriores (defensive) + INSERT simples.
-  //   4. Notificar admins (fire-and-forget).
-  //   5. [FIX-B] setAg local → jaConcluido=true imediatamente.
-  //   6. setFase('concluido').
+  // ORDEM CRÍTICA DE OPERAÇÕES (corrigida v6):
+  //
+  //   1. Atualizar checklists.fim_em  ← OPERAÇÃO PRIMÁRIA
+  //      O trigger fn_auto_concluir_agendamento (SECURITY DEFINER) dispara
+  //      aqui e atualiza agendamentos_preventivos.status → 'concluido'
+  //      de forma atômica, independente do role do usuário.
+  //
+  //   2. [FIX-A] Deletar respostas anteriores + INSERT defensivo.
+  //   3. Notificar admins (fire-and-forget).
+  //   4. [FIX-B] setAg local → jaConcluido=true imediatamente.
+  //   5. setFase('concluido').
+  //
+  // [FIX-RLS-3]: O passo anterior "Agendamento → 'concluido'" foi REMOVIDO.
+  // Ele executava antes de checklists.fim_em ser gravado e era silenciosamente
+  // bloqueado pela política RLS (0 rows, sem erro). O trigger garante
+  // que o banco seja atualizado quando fim_em é gravado.
+  //
   const finalizar = async () => {
     if (!podeFinz) {
       setErroSalv(`Responda todos os itens. Faltam ${semRespostaPecas.length + semRespostaAdmin.length}.`);
@@ -551,7 +564,10 @@ export default function Checklist() {
         },
       });
 
-      // [FIX-B] Atualiza ag local mesmo offline → bloqueia re-início na sessão atual
+      // Atualiza ag local mesmo offline → bloqueia re-início na sessão atual.
+      // O trigger fn_auto_status_agendamento_por_insert (SECURITY DEFINER)
+      // atualizará o DB quando o sync online ocorrer (INSERT com fim_em preenchido
+      // → caso b do trigger → vai direto para 'concluido').
       setAg(prev => prev ? { ...prev, status: 'concluido' } : prev);
 
       setSalvando(false);
@@ -560,31 +576,26 @@ export default function Checklist() {
     }
 
     try {
-      // ── 1. Agendamento → 'concluido' (OPERAÇÃO PRIORITÁRIA) ──────────────
-      const { error: eAg } = await supabase
-        .from('agendamentos_preventivos')
-        .update({ status: 'concluido' })
-        .eq('id', agendamentoId);
-      if (eAg) throw eAg;
-
-      // ── 2. Checklist → fim_em + obs_geral ────────────────────────────────
+      // ── 1. Checklist → fim_em + obs_geral (OPERAÇÃO PRIMÁRIA) ────────────
+      // Ao gravar fim_em, o trigger fn_auto_concluir_agendamento (SECURITY DEFINER)
+      // atualiza agendamentos_preventivos.status → 'concluido' automaticamente.
+      // Esta é a única operação necessária para garantir a transição de estado
+      // — o mecânico tem permissão de UPDATE em seus próprios checklists.
       const { error: eChk } = await supabase
         .from('checklists')
         .update({ fim_em: new Date().toISOString(), obs_geral: obsGeralFinal })
         .eq('id', checklistId);
       if (eChk) throw eChk;
 
-      // ── 3. [FIX-A] Respostas das peças ───────────────────────────────────
-      // DELETE defensivo antes do INSERT: elimina respostas parciais de
-      // tentativas anteriores (sem constraint ON CONFLICT, sem upsert).
+      // ── 2. Respostas das peças (DELETE defensivo + INSERT) ────────────────
+      // DELETE antes do INSERT elimina respostas parciais de tentativas
+      // anteriores, evitando erros de constraint em re-tentativas.
       if (pecas.length > 0) {
-        // Remove quaisquer respostas já existentes para este checklist
         await supabase
           .from('checklist_respostas')
           .delete()
           .eq('checklist_id', checklistId);
 
-        // INSERT simples — cada checklist tem ID único, sem conflitos possíveis
         const { error: eRes } = await supabase
           .from('checklist_respostas')
           .insert(
@@ -598,13 +609,16 @@ export default function Checklist() {
         if (eRes) throw eRes;
       }
 
-      // ── 4. [FIX-D] Notificação para admins (fire-and-forget) ─────────────
+      // ── 3. Notificação para admins (fire-and-forget) ──────────────────────
+      // O trigger trg_notif_preventiva_concluida do banco também dispara
+      // via agendamentos_preventivos.update, mas esta chamada explícita
+      // garante a mensagem detalhada com nome do mecânico e não-conformes.
       notificarAdmins();
 
-      // ── 5. [FIX-B] Atualiza ag local → jaConcluido=true SEM novo fetch ───
+      // ── 4. Atualiza estado local → jaConcluido=true SEM novo fetch ────────
       setAg(prev => prev ? { ...prev, status: 'concluido' } : prev);
 
-      // ── 6. Muda fase APÓS atualização local ──────────────────────────────
+      // ── 5. Muda fase APÓS atualização local ───────────────────────────────
       setFase('concluido');
 
     } catch (e) {
