@@ -1,13 +1,13 @@
 // src/pages/Preventivas/Listagem.jsx
-// CORREÇÕES v3 → v4 (alinhadas com Checklist.jsx v4):
-//   [FIX-A] podeIniciar no CardAgendamento: exige status === 'pendente' E dias <= 0.
-//           Status 'em_andamento' nunca mostra "Iniciar checklist" — mostra "Continuar".
-//           Isso evita re-início mesmo que o componente receba dados desatualizados.
-//   [FIX-B] getStatusInfo: trata explicitamente 'em_andamento' com label e cor corretos,
-//           em vez de cair no cálculo de diasParaData (que produzia label errado).
-//   [FIX-C] Aba 'pendente' inclui 'em_andamento' (mecânico pode continuar);
-//           aba 'concluido' é somente leitura (sem botão de ação).
-// INALTERADO: cores, layout, responsividade, autenticação, modal de agendamento.
+// CORREÇÕES v4 → v5 (alinhadas com Checklist.jsx v5):
+//   [FIX-A] podeIniciar: condição rígida — SOMENTE status === 'pendente' E dias <= 0.
+//           Status 'em_andamento' ou 'concluido' NUNCA renderiza o botão "Iniciar".
+//   [FIX-B] labelAcao(): reescrita defensiva — cada branch verifica explicitamente
+//           agendamento.status antes de retornar qualquer label de ação.
+//           O texto "Iniciar checklist" SÓ aparece quando status === 'pendente'.
+//   [FIX-C] CardAgendamento: botão de ação desativado e não renderizado para
+//           status 'concluido' (já existia, mantido e reforçado).
+// INALTERADO: cores, layout, responsividade, modal de agendamento, autenticação.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -29,7 +29,7 @@ function diasParaData(dateStr) {
   return Math.round((alvo - hoje) / (1000 * 60 * 60 * 24));
 }
 
-// [FIX-B] 'em_andamento' tratado explicitamente
+// Status info: 'em_andamento' tratado explicitamente
 function getStatusInfo(ag) {
   if (ag.status === 'concluido')    return { label: 'Concluído',    cor: '#10B981', bg: 'rgba(16,185,129,0.1)',  borda: 'rgba(16,185,129,0.25)' };
   if (ag.status === 'cancelado')    return { label: 'Cancelado',    cor: '#EF4444', bg: 'rgba(239,68,68,0.1)',   borda: 'rgba(239,68,68,0.25)' };
@@ -263,27 +263,45 @@ function ModalAgendarPreventiva({ onClose, onSucesso }) {
 function CardAgendamento({ agendamento, onClick, index, isSuperAdmin }) {
   const statusInfo = getStatusInfo(agendamento);
   const dias = diasParaData(agendamento.data_agendada);
+
+  // Flags de estado — derivadas EXCLUSIVAMENTE de agendamento.status
   const isConcluido   = agendamento.status === 'concluido';
   const isEmAndamento = agendamento.status === 'em_andamento';
-  const isHoje        = dias === 0 && agendamento.status === 'pendente';
-  const isAlerta      = dias > 0 && dias <= 3 && agendamento.status === 'pendente';
-  const isAtrasado    = dias < 0 && agendamento.status === 'pendente';
+  const isPendente    = agendamento.status === 'pendente';
 
-  // [FIX-A] podeIniciar: SOMENTE status 'pendente' + data já chegou.
-  // 'em_andamento' não deve iniciar de novo — deve "continuar".
-  const podeIniciar   = agendamento.status === 'pendente' && dias <= 0;
+  const isHoje    = dias === 0 && isPendente;
+  const isAlerta  = dias > 0 && dias <= 3 && isPendente;
+  const isAtrasado = dias < 0 && isPendente;
+
+  // [FIX-A] podeIniciar: CONDIÇÃO RÍGIDA — exige status === 'pendente' E data já chegou.
+  // 'em_andamento' e 'concluido' NUNCA satisfazem esta condição.
+  const podeIniciar = isPendente && dias <= 0;
 
   const mecanicoNome = agendamento.tecnico?.nome_completo ?? '—';
   const numItens = agendamento.itens_checklist?.length ?? 0;
 
-  // [FIX-A] Label do botão de ação
+  // [FIX-B] labelAcao: reescrita defensiva com verificação explícita de status.
+  // O texto "Iniciar checklist" SÓ aparece quando status === 'pendente'.
   const labelAcao = () => {
-    if (isConcluido)            return null;               // sem botão
-    if (isEmAndamento)          return '▶ Continuar';      // checklist em curso
-    if (podeIniciar && !isSuperAdmin) return '▶ Iniciar checklist';
-    if (isHoje)                 return 'Iniciar checklist';
-    return 'Ver detalhes';
+    // Concluído: sem botão de ação
+    if (isConcluido) return null;
+
+    // Em andamento: botão para continuar o checklist já aberto
+    if (isEmAndamento) return '▶ Continuar';
+
+    // Pendente + data já chegou + não é superadmin: botão de início direto
+    if (isPendente && podeIniciar && !isSuperAdmin) return '▶ Iniciar checklist';
+
+    // Pendente + hoje + superadmin: mostra ação de início (admin pode visualizar)
+    if (isPendente && isHoje) return 'Iniciar checklist';
+
+    // Pendente mas data futura ou passada sem ser hoje: apenas navegar
+    if (isPendente) return 'Ver detalhes';
+
+    // Fallback (não deve ocorrer com os status conhecidos)
+    return null;
   };
+
   const acaoLabel = labelAcao();
 
   return (
@@ -336,18 +354,22 @@ function CardAgendamento({ agendamento, onClick, index, isSuperAdmin }) {
       <div style={S.cardBot}>
         <UserIcon />
         <span style={S.mecanicoNome}>{mecanicoNome}</span>
-        {/* [FIX-A] Só exibe ação se não for concluído */}
-        {acaoLabel && (
+
+        {/* [FIX-B] Botão de ação: renderizado SOMENTE quando acaoLabel !== null */}
+        {acaoLabel !== null && (
           <span style={{
             ...S.verBtn,
+            // Estilo especial para "Iniciar" — apenas quando status === 'pendente'
             ...(podeIniciar && !isSuperAdmin ? S.verBtnIniciar : {}),
+            // Estilo especial para "Continuar" — apenas quando status === 'em_andamento'
             ...(isEmAndamento ? S.verBtnContinuar : {}),
           }}>
             {acaoLabel}
             <ChevronIcon />
           </span>
         )}
-        {/* Ícone de somente leitura para concluídos */}
+
+        {/* [FIX-C] Tag de somente leitura — exclusiva para status 'concluido' */}
         {isConcluido && (
           <span style={S.leituraTag}>Somente leitura</span>
         )}
@@ -392,10 +414,10 @@ export default function ListagemPreventivas() {
       if (!isSuperAdmin) query = query.eq('mecanico_id', profile.id);
 
       if (abaAtiva === 'pendente') {
-        // [FIX-C] Inclui 'em_andamento' na aba de pendentes (mecânico continua)
+        // Inclui 'em_andamento' na aba de pendentes (mecânico pode continuar)
         query = query.in('status', ['pendente', 'em_andamento']);
       } else {
-        // [FIX-C] Aba concluídos: somente 'concluido' — somente leitura
+        // Aba concluídos: somente 'concluido' — somente leitura
         query = query.eq('status', 'concluido');
       }
 
@@ -652,9 +674,7 @@ const S = {
   mecanicoNome: { fontSize: '12px', color: '#94A3B8', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   verBtn: { display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', fontWeight: '700', color: '#20643F', flexShrink: 0 },
   verBtnIniciar: { backgroundColor: 'rgba(32,100,63,0.08)', padding: '3px 8px', borderRadius: '6px' },
-  // [FIX-A] Estilo específico para "Continuar"
   verBtnContinuar: { backgroundColor: 'rgba(15,76,129,0.08)', color: '#0F4C81', padding: '3px 8px', borderRadius: '6px' },
-  // [FIX-C] Tag de somente leitura para concluídos
   leituraTag: { marginLeft: 'auto', fontSize: '10px', color: '#94A3B8', fontWeight: '600', padding: '2px 7px', backgroundColor: '#F1F5F9', borderRadius: '6px', flexShrink: 0 },
   estadoVazio: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 24px', gap: '12px', textAlign: 'center' },
   estadoTexto: { margin: 0, fontSize: '15px', color: '#64748B', fontWeight: '500' },
