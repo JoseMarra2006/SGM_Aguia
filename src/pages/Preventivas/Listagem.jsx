@@ -1,11 +1,13 @@
 // src/pages/Preventivas/Listagem.jsx
-// FLUXO COMPLETO:
-//   • SuperAdmin: botão "Agendar Preventiva" → modal com equipamento, mecânico,
-//     data e itens de checklist customizados (salvo em itens_checklist JSONB)
-//   • Mecânico: vê apenas suas preventivas; botão "Iniciar Checklist" visível
-//     somente quando data_agendada ≤ hoje
-//   • CORREÇÃO: query usa alias explícito `tecnico:usuarios!mecanico_id`
-//   • Cores: #20643F (verde)
+// CORREÇÕES v3 → v4 (alinhadas com Checklist.jsx v4):
+//   [FIX-A] podeIniciar no CardAgendamento: exige status === 'pendente' E dias <= 0.
+//           Status 'em_andamento' nunca mostra "Iniciar checklist" — mostra "Continuar".
+//           Isso evita re-início mesmo que o componente receba dados desatualizados.
+//   [FIX-B] getStatusInfo: trata explicitamente 'em_andamento' com label e cor corretos,
+//           em vez de cair no cálculo de diasParaData (que produzia label errado).
+//   [FIX-C] Aba 'pendente' inclui 'em_andamento' (mecânico pode continuar);
+//           aba 'concluido' é somente leitura (sem botão de ação).
+// INALTERADO: cores, layout, responsividade, autenticação, modal de agendamento.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -27,9 +29,12 @@ function diasParaData(dateStr) {
   return Math.round((alvo - hoje) / (1000 * 60 * 60 * 24));
 }
 
+// [FIX-B] 'em_andamento' tratado explicitamente
 function getStatusInfo(ag) {
-  if (ag.status === 'concluido') return { label: 'Concluído', cor: '#10B981', bg: 'rgba(16,185,129,0.1)', borda: 'rgba(16,185,129,0.25)' };
-  if (ag.status === 'cancelado') return { label: 'Cancelado', cor: '#EF4444', bg: 'rgba(239,68,68,0.1)',  borda: 'rgba(239,68,68,0.25)' };
+  if (ag.status === 'concluido')    return { label: 'Concluído',    cor: '#10B981', bg: 'rgba(16,185,129,0.1)',  borda: 'rgba(16,185,129,0.25)' };
+  if (ag.status === 'cancelado')    return { label: 'Cancelado',    cor: '#EF4444', bg: 'rgba(239,68,68,0.1)',   borda: 'rgba(239,68,68,0.25)' };
+  if (ag.status === 'em_andamento') return { label: 'Em andamento', cor: '#0F4C81', bg: 'rgba(15,76,129,0.08)', borda: 'rgba(15,76,129,0.2)' };
+  // status === 'pendente': calcula por dias
   const dias = diasParaData(ag.data_agendada);
   if (dias < 0)   return { label: 'Atrasado',   cor: '#EF4444', bg: 'rgba(239,68,68,0.08)',    borda: 'rgba(239,68,68,0.2)' };
   if (dias === 0) return { label: 'Hoje',        cor: '#20643F', bg: 'rgba(32,100,63,0.1)',     borda: 'rgba(32,100,63,0.25)' };
@@ -62,7 +67,6 @@ function ModalAgendarPreventiva({ onClose, onSucesso }) {
   const [sugestaoAberta,  setSugestaoAberta]  = useState(false);
   const inputItemRef = useRef(null);
 
-  // Mínimo: amanhã
   const dataMin = new Date();
   dataMin.setDate(dataMin.getDate());
   const dataMinStr = dataMin.toISOString().split('T')[0];
@@ -122,7 +126,7 @@ function ModalAgendarPreventiva({ onClose, onSucesso }) {
           mecanico_id:      mecanicoId,
           data_agendada:    dataAgendada,
           status:           'pendente',
-          itens_checklist:  itens,  // JSONB array salvo no banco
+          itens_checklist:  itens,
         });
       if (error) throw error;
       onSucesso();
@@ -142,7 +146,6 @@ function ModalAgendarPreventiva({ onClose, onSucesso }) {
       <div style={M.box} onClick={e => e.stopPropagation()}>
         <style>{CSS_MODAL}</style>
 
-        {/* Header */}
         <div style={M.header}>
           <div style={M.headerLeft}>
             <CalendarPlusIcon />
@@ -151,7 +154,6 @@ function ModalAgendarPreventiva({ onClose, onSucesso }) {
           <button onClick={onClose} style={M.btnFechar} disabled={salvando}><CloseIcon /></button>
         </div>
 
-        {/* Corpo */}
         <div style={M.corpo}>
           {loadingDados ? (
             <div style={M.loading}>
@@ -160,15 +162,10 @@ function ModalAgendarPreventiva({ onClose, onSucesso }) {
             </div>
           ) : (
             <>
-              {/* Equipamento */}
               <div style={M.campo}>
                 <label style={M.label}>Equipamento *</label>
-                <select
-                  value={equipamentoId}
-                  onChange={e => setEquipamentoId(e.target.value)}
-                  style={{ ...M.select, ...(erros.equipamento ? M.inputErr : {}) }}
-                  disabled={salvando}
-                >
+                <select value={equipamentoId} onChange={e => setEquipamentoId(e.target.value)}
+                  style={{ ...M.select, ...(erros.equipamento ? M.inputErr : {}) }} disabled={salvando}>
                   <option value="">Selecione o equipamento...</option>
                   {equipamentos.map(eq => (
                     <option key={eq.id} value={eq.id}>
@@ -179,15 +176,10 @@ function ModalAgendarPreventiva({ onClose, onSucesso }) {
                 {erros.equipamento && <span style={M.fieldError}>{erros.equipamento}</span>}
               </div>
 
-              {/* Mecânico */}
               <div style={M.campo}>
                 <label style={M.label}>Mecânico responsável *</label>
-                <select
-                  value={mecanicoId}
-                  onChange={e => setMecanicoId(e.target.value)}
-                  style={{ ...M.select, ...(erros.mecanico ? M.inputErr : {}) }}
-                  disabled={salvando}
-                >
+                <select value={mecanicoId} onChange={e => setMecanicoId(e.target.value)}
+                  style={{ ...M.select, ...(erros.mecanico ? M.inputErr : {}) }} disabled={salvando}>
                   <option value="">Selecione o mecânico...</option>
                   {mecanicos.map(m => (
                     <option key={m.id} value={m.id}>{m.nome_completo}</option>
@@ -196,47 +188,30 @@ function ModalAgendarPreventiva({ onClose, onSucesso }) {
                 {erros.mecanico && <span style={M.fieldError}>{erros.mecanico}</span>}
               </div>
 
-              {/* Data */}
               <div style={M.campo}>
                 <label style={M.label}>Data da manutenção *</label>
-                <input
-                  type="date"
-                  value={dataAgendada}
-                  min={dataMinStr}
+                <input type="date" value={dataAgendada} min={dataMinStr}
                   onChange={e => setDataAgendada(e.target.value)}
-                  style={{ ...M.input, ...(erros.data ? M.inputErr : {}) }}
-                  disabled={salvando}
-                />
+                  style={{ ...M.input, ...(erros.data ? M.inputErr : {}) }} disabled={salvando} />
                 {erros.data && <span style={M.fieldError}>{erros.data}</span>}
               </div>
 
-              {/* Itens de checklist */}
               <div style={M.campo}>
                 <div style={M.checklistHeader}>
                   <label style={M.label}>
                     Itens do checklist
-                    {itens.length > 0 && (
-                      <span style={M.countBadge}>{itens.length}</span>
-                    )}
+                    {itens.length > 0 && <span style={M.countBadge}>{itens.length}</span>}
                   </label>
-                  <span style={M.checklistHint}>
-                    Pontos que o mecânico deve verificar
-                  </span>
+                  <span style={M.checklistHint}>Pontos que o mecânico deve verificar</span>
                 </div>
 
-                {/* Lista de itens adicionados */}
                 {itens.length > 0 && (
                   <ul style={M.itensList}>
                     {itens.map((item, idx) => (
                       <li key={idx} style={M.itemRow}>
                         <CheckSmIcon />
                         <span style={M.itemTexto}>{item}</span>
-                        <button
-                          onClick={() => removerItem(idx)}
-                          style={M.btnRemoverItem}
-                          disabled={salvando}
-                          type="button"
-                        >
+                        <button onClick={() => removerItem(idx)} style={M.btnRemoverItem} disabled={salvando} type="button">
                           <CloseSmIcon />
                         </button>
                       </li>
@@ -244,67 +219,36 @@ function ModalAgendarPreventiva({ onClose, onSucesso }) {
                   </ul>
                 )}
 
-                {/* Input novo item */}
                 <div style={M.addItemRow}>
-                  <input
-                    ref={inputItemRef}
-                    type="text"
-                    placeholder="Ex: Verificar nível de óleo..."
+                  <input ref={inputItemRef} type="text" placeholder="Ex: Verificar nível de óleo..."
                     value={novoItem}
                     onChange={e => { setNovoItem(e.target.value); setSugestaoAberta(e.target.value.length > 0); }}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); adicionarItem(); } }}
-                    style={M.inputItem}
-                    disabled={salvando}
-                    maxLength={80}
-                    autoComplete="off"
-                  />
-                  <button
-                    onClick={() => adicionarItem()}
-                    style={M.btnAddItem}
-                    disabled={salvando || !novoItem.trim()}
-                    type="button"
-                  >
-                    +
-                  </button>
+                    style={M.inputItem} disabled={salvando} maxLength={80} autoComplete="off" />
+                  <button onClick={() => adicionarItem()} style={M.btnAddItem}
+                    disabled={salvando || !novoItem.trim()} type="button">+</button>
                 </div>
 
-                {/* Sugestões rápidas */}
                 <div style={M.sugestoesLabel}>Sugestões rápidas:</div>
                 <div style={M.sugestoesRow}>
                   {sugestoesFiltradas.slice(0, 6).map((s, i) => (
-                    <button
-                      key={i}
-                      onClick={() => adicionarItem(s)}
-                      style={M.chipSugestao}
-                      disabled={salvando}
-                      type="button"
-                    >
-                      + {s}
-                    </button>
+                    <button key={i} onClick={() => adicionarItem(s)} style={M.chipSugestao}
+                      disabled={salvando} type="button">+ {s}</button>
                   ))}
                 </div>
               </div>
 
               {erroGlobal && (
-                <div style={M.erroGlobal}>
-                  <AlertIcon /> {erroGlobal}
-                </div>
+                <div style={M.erroGlobal}><AlertIcon /> {erroGlobal}</div>
               )}
             </>
           )}
         </div>
 
-        {/* Footer */}
         {!loadingDados && (
           <div style={M.footer}>
-            <button onClick={onClose} style={M.btnSecundario} disabled={salvando}>
-              Cancelar
-            </button>
-            <button
-              onClick={handleSalvar}
-              style={{ ...M.btnPrimario, opacity: salvando ? 0.7 : 1 }}
-              disabled={salvando}
-            >
+            <button onClick={onClose} style={M.btnSecundario} disabled={salvando}>Cancelar</button>
+            <button onClick={handleSalvar} style={{ ...M.btnPrimario, opacity: salvando ? 0.7 : 1 }} disabled={salvando}>
               {salvando ? <><Spinner /> Agendando...</> : <><CalendarPlusIcon size={15} /> Agendar</>}
             </button>
           </div>
@@ -319,14 +263,28 @@ function ModalAgendarPreventiva({ onClose, onSucesso }) {
 function CardAgendamento({ agendamento, onClick, index, isSuperAdmin }) {
   const statusInfo = getStatusInfo(agendamento);
   const dias = diasParaData(agendamento.data_agendada);
-  const isConcluido = agendamento.status === 'concluido';
-  const isHoje     = dias === 0 && agendamento.status === 'pendente';
-  const isAlerta   = dias > 0 && dias <= 3 && agendamento.status === 'pendente';
-  const isAtrasado = dias < 0 && agendamento.status === 'pendente';
-  const podeIniciar = (dias <= 0) && agendamento.status === 'pendente';
+  const isConcluido   = agendamento.status === 'concluido';
+  const isEmAndamento = agendamento.status === 'em_andamento';
+  const isHoje        = dias === 0 && agendamento.status === 'pendente';
+  const isAlerta      = dias > 0 && dias <= 3 && agendamento.status === 'pendente';
+  const isAtrasado    = dias < 0 && agendamento.status === 'pendente';
+
+  // [FIX-A] podeIniciar: SOMENTE status 'pendente' + data já chegou.
+  // 'em_andamento' não deve iniciar de novo — deve "continuar".
+  const podeIniciar   = agendamento.status === 'pendente' && dias <= 0;
 
   const mecanicoNome = agendamento.tecnico?.nome_completo ?? '—';
   const numItens = agendamento.itens_checklist?.length ?? 0;
+
+  // [FIX-A] Label do botão de ação
+  const labelAcao = () => {
+    if (isConcluido)            return null;               // sem botão
+    if (isEmAndamento)          return '▶ Continuar';      // checklist em curso
+    if (podeIniciar && !isSuperAdmin) return '▶ Iniciar checklist';
+    if (isHoje)                 return 'Iniciar checklist';
+    return 'Ver detalhes';
+  };
+  const acaoLabel = labelAcao();
 
   return (
     <article
@@ -378,14 +336,20 @@ function CardAgendamento({ agendamento, onClick, index, isSuperAdmin }) {
       <div style={S.cardBot}>
         <UserIcon />
         <span style={S.mecanicoNome}>{mecanicoNome}</span>
-        {!isConcluido && (
+        {/* [FIX-A] Só exibe ação se não for concluído */}
+        {acaoLabel && (
           <span style={{
             ...S.verBtn,
             ...(podeIniciar && !isSuperAdmin ? S.verBtnIniciar : {}),
+            ...(isEmAndamento ? S.verBtnContinuar : {}),
           }}>
-            {podeIniciar && !isSuperAdmin ? '▶ Iniciar checklist' : isHoje ? 'Iniciar checklist' : 'Ver detalhes'}
+            {acaoLabel}
             <ChevronIcon />
           </span>
+        )}
+        {/* Ícone de somente leitura para concluídos */}
+        {isConcluido && (
+          <span style={S.leituraTag}>Somente leitura</span>
         )}
       </div>
     </article>
@@ -413,7 +377,6 @@ export default function ListagemPreventivas() {
     setLoading(true);
     setErro(null);
     try {
-      // ─── alias explícito para resolver ambiguidade de FK ────────────────
       let query = supabase
         .from('agendamentos_preventivos')
         .select(`
@@ -429,8 +392,10 @@ export default function ListagemPreventivas() {
       if (!isSuperAdmin) query = query.eq('mecanico_id', profile.id);
 
       if (abaAtiva === 'pendente') {
+        // [FIX-C] Inclui 'em_andamento' na aba de pendentes (mecânico continua)
         query = query.in('status', ['pendente', 'em_andamento']);
       } else {
+        // [FIX-C] Aba concluídos: somente 'concluido' — somente leitura
         query = query.eq('status', 'concluido');
       }
 
@@ -456,7 +421,6 @@ export default function ListagemPreventivas() {
     <div style={S.page}>
       <style>{CSS}</style>
 
-      {/* Modal de agendamento */}
       {modalAberto && (
         <ModalAgendarPreventiva
           onClose={() => setModalAberto(false)}
@@ -478,7 +442,6 @@ export default function ListagemPreventivas() {
                 <span>{totalAlertas} alerta{totalAlertas > 1 ? 's' : ''}</span>
               </div>
             )}
-            {/* Botão exclusivo para SuperAdmin */}
             {isSuperAdmin && (
               <button onClick={() => setModalAberto(true)} style={S.btnAgendar}>
                 <CalendarPlusIcon size={15} />
@@ -488,7 +451,7 @@ export default function ListagemPreventivas() {
           </div>
         </div>
 
-        {/* Resumo */}
+        {/* Resumo (SuperAdmin) */}
         {isSuperAdmin && (
           <div style={S.resumoRow}>
             <div style={S.resumoChip}>
@@ -517,11 +480,8 @@ export default function ListagemPreventivas() {
         {/* Abas */}
         <div style={S.abasRow}>
           {ABAS.map(aba => (
-            <button
-              key={aba.value}
-              onClick={() => setAbaAtiva(aba.value)}
-              style={{ ...S.abaBtn, ...(abaAtiva === aba.value ? S.abaBtnAtiva : {}) }}
-            >
+            <button key={aba.value} onClick={() => setAbaAtiva(aba.value)}
+              style={{ ...S.abaBtn, ...(abaAtiva === aba.value ? S.abaBtnAtiva : {}) }}>
               {aba.label}
             </button>
           ))}
@@ -638,7 +598,6 @@ const M = {
   input: { padding: '11px 13px', fontSize: '14px', border: '1.5px solid #E2E8F0', borderRadius: '9px', backgroundColor: '#FAFBFC', color: '#0D1B2A', fontFamily: 'inherit', boxSizing: 'border-box', width: '100%' },
   inputErr: { borderColor: '#FCA5A5', backgroundColor: '#FFF5F5' },
   fieldError: { fontSize: '11px', color: '#EF4444', fontWeight: '500' },
-  // Checklist items
   checklistHeader: { display: 'flex', flexDirection: 'column', gap: '2px', marginBottom: '2px' },
   checklistHint: { fontSize: '11px', color: '#94A3B8', fontWeight: '400' },
   countBadge: { padding: '1px 7px', backgroundColor: 'rgba(32,100,63,0.1)', color: '#20643F', borderRadius: '20px', fontSize: '10px', fontWeight: '700', marginLeft: '4px' },
@@ -693,6 +652,10 @@ const S = {
   mecanicoNome: { fontSize: '12px', color: '#94A3B8', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   verBtn: { display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', fontWeight: '700', color: '#20643F', flexShrink: 0 },
   verBtnIniciar: { backgroundColor: 'rgba(32,100,63,0.08)', padding: '3px 8px', borderRadius: '6px' },
+  // [FIX-A] Estilo específico para "Continuar"
+  verBtnContinuar: { backgroundColor: 'rgba(15,76,129,0.08)', color: '#0F4C81', padding: '3px 8px', borderRadius: '6px' },
+  // [FIX-C] Tag de somente leitura para concluídos
+  leituraTag: { marginLeft: 'auto', fontSize: '10px', color: '#94A3B8', fontWeight: '600', padding: '2px 7px', backgroundColor: '#F1F5F9', borderRadius: '6px', flexShrink: 0 },
   estadoVazio: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 24px', gap: '12px', textAlign: 'center' },
   estadoTexto: { margin: 0, fontSize: '15px', color: '#64748B', fontWeight: '500' },
   btnRetry: { padding: '10px 20px', backgroundColor: '#20643F', color: '#FFFFFF', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },

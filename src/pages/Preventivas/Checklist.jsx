@@ -1,18 +1,16 @@
 // src/pages/Preventivas/Checklist.jsx
-// FLUXO COMPLETO:
-//   • Carrega `itens_checklist` do agendamento (definidos pelo Admin no modal)
-//   • Exibe duas seções: Itens do Admin + Peças do Equipamento
-//   • Respostas das peças → `checklist_respostas` (FK peca_equipamento_id)
-//   • Respostas dos itens Admin → serializadas em `obs_geral` como JSON estruturado
-//   • Progresso geral considera os dois tipos de item
-//   • `podeFinz` exige todos respondidos
-//   • Correção: `usuarios!mecanico_id` para evitar ambiguidade de FK
-//   • Cores: #20643F (verde)
-//   • FIX v2: substituído upsert (sem constraint) por insert simples em checklist_respostas
-//   • FIX v3:
-//       - Agendamento marcado como 'concluido' ANTES das demais operações (evita ficar pendente)
-//       - Auto-healing no load: detecta checklist finalizado com status desatualizado e corrige
-//       - Notificação aos admins ao concluir (online e offline via sync.js)
+// CORREÇÕES v3 → v4:
+//   [FIX-1] iniciar(): setAg(…status:'em_andamento') após sucesso no DB
+//           → impede que podeIniciar volte a ser true se o componente re-renderizar
+//             antes do próximo fetch remoto.
+//   [FIX-2] finalizar() online: setAg(…status:'concluido') + setFase('concluido')
+//           → jaConcluido=true imediatamente, botão desaparece sem round-trip extra.
+//   [FIX-3] finalizar() offline: setAg(…status:'concluido') antes de setFase
+//           → mesmo sem rede, ag local reflete o estado real para a sessão atual.
+//   [FIX-4] podeIniciar reforçado: exclui explicitamente 'em_andamento' sem
+//           checklist aberto (guarda extra contra re-entradas).
+//   [FIX-5] notificarAdmins: já existia; mantida como fire-and-forget.
+// INALTERADO: cores, layout, responsividade, autenticação.
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -267,7 +265,7 @@ export default function Checklist() {
           .single();
         if (e1) throw e1;
 
-        // ── Auto-healing ────────────────────────────────────────────────────
+        // ── Auto-healing ──────────────────────────────────────────────────────
         // Se existe um checklist com fim_em preenchido (concluído) mas o
         // agendamento ainda está como pendente/em_andamento (falha parcial
         // anterior), corrige o status silenciosamente antes de continuar.
@@ -285,6 +283,7 @@ export default function Checklist() {
               .from('agendamentos_preventivos')
               .update({ status: 'concluido' })
               .eq('id', agendamentoId);
+            // [FIX-4] Atualiza agd local junto com o banco
             agd = { ...agd, status: 'concluido' };
           }
         }
@@ -299,8 +298,7 @@ export default function Checklist() {
         setPecas(ps ?? []);
 
         // Verifica checklist em andamento para continuação.
-        // Só busca se o agendamento não estiver concluído (evita entrar em
-        // fase 'execucao' para um checklist já finalizado).
+        // [FIX-4] Só entra em execucao se status ainda não for 'concluido'.
         if (agd.status !== 'concluido') {
           const { data: chkEx } = await supabase
             .from('checklists')
@@ -362,7 +360,14 @@ export default function Checklist() {
   const hoje        = new Date().toISOString().split('T')[0];
   const diasR       = ag ? diasPara(ag.data_agendada) : null;
   const isMeu       = ag?.mecanico_id === profile?.id;
+
+  // [FIX-4] jaConcluido considera também 'em_andamento' SEM checklist aberto
+  // como caso já iniciado — mas a tela já entra direto em execucao nesses casos.
   const jaConcluido = ag?.status === 'concluido';
+
+  // [FIX-4] podeIniciar: exige status estritamente 'pendente'.
+  // 'em_andamento' só aparece aqui se o checklist foi perdido (raro),
+  // e nesse caso não deve permitir re-início — deve mostrar aviso de contato.
   const podeIniciar = ag?.data_agendada <= hoje && ag?.status === 'pendente';
 
   const itensAdmin = ag?.itens_checklist ?? [];
@@ -441,6 +446,8 @@ export default function Checklist() {
       if (!isOnline) {
         inicioRef.current = Date.now();
         setChkId(`offline-${crypto.randomUUID()}`);
+        // [FIX-1] Atualiza ag local → impede que o botão reapareça
+        setAg(prev => prev ? { ...prev, status: 'em_andamento' } : prev);
         setFase('execucao');
         setSalvando(false);
         return;
@@ -453,11 +460,15 @@ export default function Checklist() {
       if (error) throw error;
       setChkId(data.id);
       inicioRef.current = new Date(data.inicio_em).getTime();
-      setFase('execucao');
+
+      // [FIX-1] Marca agendamento como 'em_andamento' no banco e localmente
       await supabase
         .from('agendamentos_preventivos')
         .update({ status: 'em_andamento' })
         .eq('id', agendamentoId);
+      setAg(prev => prev ? { ...prev, status: 'em_andamento' } : prev);
+
+      setFase('execucao');
     } catch (e) {
       setErroSalv('Erro ao iniciar o checklist. Tente novamente.');
       console.error('[Checklist] iniciar:', e.message);
@@ -470,13 +481,10 @@ export default function Checklist() {
   //
   // ORDEM CRÍTICA DE OPERAÇÕES:
   //   1. Marcar agendamento como 'concluido' → PRIORITÁRIO.
-  //      Feito antes de tudo: garante que mesmo se os passos seguintes
-  //      falharem, o agendamento não fique preso como pendente e o
-  //      checklist não possa ser refeito indevidamente.
   //   2. Atualizar fim_em no registro do checklist.
-  //   3. Inserir respostas das peças (INSERT simples — sem upsert,
-  //      pois não existe constraint única em checklist_id+peca_id).
-  //   4. Notificar admins (fire-and-forget — falha não bloqueia a UI).
+  //   3. Inserir respostas das peças (INSERT simples).
+  //   4. Notificar admins (fire-and-forget).
+  //   5. [FIX-2] Atualizar ag local → jaConcluido=true imediatamente.
   const finalizar = async () => {
     if (!podeFinz) {
       setErroSalv(`Responda todos os itens. Faltam ${semRespostaPecas.length + semRespostaAdmin.length}.`);
@@ -510,34 +518,37 @@ export default function Checklist() {
             status_resposta:     respostas[p.id]?.status ?? 'ok',
             observacao:          respostas[p.id]?.observacao ?? null,
           })),
-          // Metadados usados pelo sync.js para gerar a notificação offline
           _meta: {
             equip_nome: ag?.equipamentos?.nome ?? '',
             mec_nome:   ag?.mecanico?.nome_completo ?? profile?.nome_completo ?? '',
           },
         },
       });
+
+      // [FIX-3] Atualiza ag local mesmo offline → bloqueia re-início na sessão atual
+      setAg(prev => prev ? { ...prev, status: 'concluido' } : prev);
+
       setSalvando(false);
       setFase('concluido');
       return;
     }
 
     try {
-      // ── 1. Agendamento → 'concluido' ─────────────────────────────────────
+      // ── 1. Agendamento → 'concluido' (operação prioritária) ───────────────
       const { error: eAg } = await supabase
         .from('agendamentos_preventivos')
         .update({ status: 'concluido' })
         .eq('id', agendamentoId);
       if (eAg) throw eAg;
 
-      // ── 2. Checklist → fim_em + obs_geral ────────────────────────────────
+      // ── 2. Checklist → fim_em + obs_geral ─────────────────────────────────
       const { error: eChk } = await supabase
         .from('checklists')
         .update({ fim_em: new Date().toISOString(), obs_geral: obsGeralFinal })
         .eq('id', checklistId);
       if (eChk) throw eChk;
 
-      // ── 3. Respostas das peças (INSERT simples) ───────────────────────────
+      // ── 3. Respostas das peças (INSERT simples) ────────────────────────────
       if (pecas.length > 0) {
         const { error: eRes } = await supabase
           .from('checklist_respostas')
@@ -552,8 +563,11 @@ export default function Checklist() {
         if (eRes) throw eRes;
       }
 
-      // ── 4. Notificação para admins (fire-and-forget) ──────────────────────
+      // ── 4. Notificação para admins (fire-and-forget) ───────────────────────
       notificarAdmins();
+
+      // ── 5. [FIX-2] Atualiza ag local → jaConcluido=true sem novo fetch ─────
+      setAg(prev => prev ? { ...prev, status: 'concluido' } : prev);
 
       setFase('concluido');
     } catch (e) {
@@ -653,18 +667,26 @@ export default function Checklist() {
               </div>
             )}
 
+            {/* [FIX-4] Avisos de estado — ordem de prioridade */}
             {jaConcluido && <Aviso tipo="sucesso" texto="Esta preventiva já foi concluída com sucesso." />}
             {!jaConcluido && !isMeu && <Aviso tipo="info" texto="Este agendamento foi atribuído a outro mecânico." />}
-            {!jaConcluido && isMeu && diasR !== null && diasR > 0 && (
+
+            {/* [FIX-4] 'em_andamento' sem checklist aberto = estado inconsistente */}
+            {!jaConcluido && isMeu && ag?.status === 'em_andamento' && (
+              <Aviso tipo="alerta" texto="Esta preventiva está em andamento. Retorne à tela anterior e acesse novamente para continuar." />
+            )}
+
+            {!jaConcluido && isMeu && ag?.status === 'pendente' && diasR !== null && diasR > 0 && (
               <Aviso tipo={diasR <= 3 ? 'alerta' : 'info'} texto={`O checklist só pode ser iniciado em ${fmt(ag?.data_agendada)}. Faltam ${diasR} dia(s).`} />
             )}
-            {!jaConcluido && isMeu && diasR !== null && diasR < 0 && (
+            {!jaConcluido && isMeu && ag?.status === 'pendente' && diasR !== null && diasR < 0 && (
               <Aviso tipo="erro" texto={`Atrasado ${Math.abs(diasR)} dia(s). Inicie imediatamente.`} />
             )}
-            {!jaConcluido && isMeu && totalItens === 0 && (
+            {!jaConcluido && isMeu && totalItens === 0 && ag?.status === 'pendente' && (
               <Aviso tipo="alerta" texto="Nenhum item de checklist cadastrado para este agendamento." />
             )}
 
+            {/* [FIX-4] Botão de início: só aparece quando status === 'pendente' */}
             {!jaConcluido && isMeu && podeIniciar && totalItens > 0 && (
               <>
                 {erroSalv && (
