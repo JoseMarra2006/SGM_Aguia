@@ -1,5 +1,5 @@
 // src/pages/Dashboard/Painel.jsx
-// ADIÇÕES:
+// ADIÇÕES v2:
 //   • Ícone de sino (BellIcon) no header com badge de não-lidas
 //   • Painel lateral de notificações (slide-in da direita)
 //   • Subscription Supabase Realtime para notificações em tempo real
@@ -7,7 +7,10 @@
 // MANTIDAS:
 //   • Todas as lógicas de autenticação e AuthStore
 //   • Paleta de cores verde (#20643F)
-//   • AguiaLogo SVG inline
+// CORREÇÕES DE ÍCONE (cirúrgico):
+//   • Header: substituído <AguiaLogo /> (SVG inline) por logo_empresa.png real
+//   • btnSino + btnLogout: adicionado padding:0 para corrigir SVG comprimido
+//     pelo padding global do index.css (button { padding: 0.6em 1.2em })
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -15,6 +18,8 @@ import { supabase } from '../../services/supabase';
 import useAuthStore from '../../store/authStore';
 import useAppStore from '../../store/appStore';
 import { SecurityAlertModal } from '../Login/Login.jsx';
+// ─── CORREÇÃO 1: importa logo real da empresa ──────────────────────────────
+import logoEmpresa from '../../assets/logo_empresa.png';
 import {
   subscribeToNotificacoes,
   iconePorTipo,
@@ -64,12 +69,8 @@ function PainelNotificacoes({ onClose }) {
 
   return (
     <>
-      {/* Overlay para fechar clicando fora */}
       <div style={NS.overlay} onClick={onClose} />
-
-      {/* Painel lateral */}
       <div style={NS.painel}>
-        {/* Cabeçalho */}
         <div style={NS.header}>
           <div style={NS.headerLeft}>
             <span style={NS.titulo}>Notificações</span>
@@ -89,7 +90,6 @@ function PainelNotificacoes({ onClose }) {
           </div>
         </div>
 
-        {/* Lista */}
         <div style={NS.lista}>
           {notifLoading ? (
             <div style={NS.vazio}>
@@ -193,7 +193,6 @@ function ItemPrevAtrasada({ ag, onClick }) {
         <span style={S.osEquip}>{ag.equipamentos?.nome ?? '—'}</span>
         <span style={S.osProblema}>Preventiva não realizada</span>
         <div style={S.osMeta}>
-          {/* CORREÇÃO: usa `tecnico` em vez de `usuarios` */}
           <span style={S.osMetaItem}><UserSmIcon /> {ag.tecnico?.nome_completo ?? '—'}</span>
           <span style={S.osMetaDot} />
           <span style={{ ...S.osMetaItem, color: '#EF4444', fontWeight: '600' }}>
@@ -226,30 +225,23 @@ export default function Painel() {
 
   const unsubNotifRef = useRef(null);
 
-  // ─── Carrega notificações + assina Realtime ──────────────────
   useEffect(() => {
     if (!profile?.id) return;
-
     loadNotifications(profile.id);
-
-    // Subscription Supabase Realtime
     unsubNotifRef.current = subscribeToNotificacoes(profile.id, (notif) => {
       addNotification(notif);
     });
-
     return () => {
       if (unsubNotifRef.current) unsubNotifRef.current();
     };
   }, [profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Limpa notificações ao desmontar (ex: logout via outro componente)
   useEffect(() => {
     return () => {
       if (unsubNotifRef.current) unsubNotifRef.current();
     };
   }, []);
 
-  // ─── Busca métricas ───────────────────────────────────────────
   useEffect(() => {
     async function fetchMetricas() {
       setLoadingMetricas(true);
@@ -282,7 +274,6 @@ export default function Painel() {
     fetchMetricas();
   }, []);
 
-  // ─── Busca listas detalhadas ───────────────────────────────────
   useEffect(() => {
     async function fetchListas() {
       setLoadingListas(true);
@@ -297,7 +288,6 @@ export default function Painel() {
           .limit(5);
         if (!isSuperAdmin) qOS = qOS.eq('mecanico_id', profile.id);
 
-        // CORREÇÃO: relação explícita para preventivas
         let qPrev = supabase
           .from('agendamentos_preventivos')
           .select(`id, data_agendada, equipamentos(nome), tecnico:usuarios!mecanico_id(nome_completo)`)
@@ -337,7 +327,6 @@ export default function Painel() {
         />
       )}
 
-      {/* ── Painel de Notificações (renderizado sobre tudo) ── */}
       {notifPanelOpen && (
         <PainelNotificacoes onClose={() => setNotifPanelOpen(false)} />
       )}
@@ -345,8 +334,13 @@ export default function Painel() {
       {/* ── Header ── */}
       <header style={S.header}>
         <div style={S.headerInner}>
+          {/* ─── CORREÇÃO 2: usa logo real da empresa em vez de SVG inline ──── */}
           <div style={S.logoMark}>
-            <AguiaLogo />
+            <img
+              src={logoEmpresa}
+              alt="SGM Águia"
+              style={{ height: '40px', width: 'auto', objectFit: 'contain', filter: 'brightness(0) invert(1)' }}
+            />
           </div>
           <div style={S.headerTextos}>
             <span style={S.headerSub}>Sistema de Manutenção</span>
@@ -359,7 +353,7 @@ export default function Painel() {
               </div>
             )}
 
-            {/* ── Sino de Notificações ── */}
+            {/* Sino de Notificações */}
             <button
               onClick={() => setNotifPanelOpen(true)}
               style={S.btnSino}
@@ -534,19 +528,6 @@ function EmptyLista({ icone, texto }) {
   );
 }
 
-// ─── Logo SGM Águia ───────────────────────────────────────────
-function AguiaLogo() {
-  return (
-    <svg width="40" height="40" viewBox="0 0 48 48" fill="none" aria-label="SGM Águia">
-      <rect width="48" height="48" rx="10" fill="rgba(255,255,255,0.18)"/>
-      <path d="M14 34V22l10-8 10 8v12H28v-8h-8v8H14z" fill="white"/>
-      <circle cx="24" cy="18" r="3" fill="#F59E0B"/>
-      <path d="M10 26 Q6 22 10 18 L14 22" fill="rgba(255,255,255,0.55)"/>
-      <path d="M38 26 Q42 22 38 18 L34 22" fill="rgba(255,255,255,0.55)"/>
-    </svg>
-  );
-}
-
 // ─── Ícones ───────────────────────────────────────────────────
 function CloseIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
 function ChevronIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ color: '#CBD5E1', flexShrink: 0 }}><path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
@@ -659,11 +640,11 @@ const S = {
   headerNome: { fontSize: '16px', color: '#FFFFFF', fontWeight: '700', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   headerAcoes: { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
   offlinePill: { display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '20px', fontSize: '11px', color: '#FFFFFF', fontWeight: '600' },
-  // Botão sino
+  // ─── CORREÇÃO 3: padding:0 nos dois botões para anular o padding global do index.css ───
   btnSino: {
     position: 'relative',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    width: '36px', height: '36px',
+    width: '36px', height: '36px', padding: 0,
     border: '1.5px solid rgba(255,255,255,0.5)',
     borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)',
     cursor: 'pointer', color: '#FFFFFF',
@@ -676,7 +657,8 @@ const S = {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     border: '2px solid #20643F',
   },
-  btnLogout: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: '1.5px solid rgba(255,255,255,0.5)', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)', cursor: 'pointer', color: '#FFFFFF' },
+  // ─── CORREÇÃO 4: padding:0 no btnLogout ───────────────────────────────────
+  btnLogout: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: 0, border: '1.5px solid rgba(255,255,255,0.5)', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)', cursor: 'pointer', color: '#FFFFFF' },
   syncBanner: { display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 16px', backgroundColor: 'rgba(245,158,11,0.2)', borderTop: '1px solid rgba(245,158,11,0.3)', fontSize: '12px', color: '#FEF3C7', fontWeight: '500' },
   main: { padding: '16px', display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '640px', margin: '0 auto', width: '100%', boxSizing: 'border-box' },
   sectionLabel: { margin: '0 0 10px 0', fontSize: '11px', fontWeight: '700', color: '#94A3B8', letterSpacing: '1.2px', textTransform: 'uppercase' },

@@ -26,7 +26,8 @@ import useAppStore from '../store/appStore';
  *  type: 'checklist_completo'
  *  payload: {
  *    checklist: { agendamento_id, mecanico_id, obs_geral, fim_em },
- *    respostas: [{ peca_equipamento_id, status_resposta, observacao }]
+ *    respostas: [{ peca_equipamento_id, status_resposta, observacao }],
+ *    _meta:     { equip_nome, mec_nome }   ← usado para notificação offline
  *  }
  *
  *  type: 'os_completa'
@@ -175,14 +176,9 @@ async function processChecklistQueue() {
  * @param {import('./storage').QueueItem} item
  */
 async function syncChecklist(item) {
-  const { checklist, respostas } = item.payload;
+  const { checklist, respostas, _meta } = item.payload;
 
-  // 1. Verifica se o checklist já foi criado (idempotência via localId em obs_geral)
-  //    Estratégia: busca por localId gravado no campo obs_geral como metadado JSON.
-  //    Em produção, considere uma coluna `local_id` dedicada na tabela.
-  const checklistMeta = JSON.stringify({ localId: item.localId });
-
-  // Insere o checklist
+  // 1. Insere o checklist
   const { data: checklistCriado, error: errChecklist } = await supabase
     .from('checklists')
     .insert({
@@ -222,13 +218,79 @@ async function syncChecklist(item) {
     if (errRespostas) throw errRespostas;
   }
 
-  // 3. Atualiza status do agendamento para 'concluido'
+  // 3. Marca o agendamento como 'concluido'
   const { error: errAgend } = await supabase
     .from('agendamentos_preventivos')
     .update({ status: 'concluido' })
     .eq('id', checklist.agendamento_id);
 
   if (errAgend) throw errAgend;
+
+  // 4. Notifica admins (fire-and-forget — falha não interrompe a sync)
+  notificarAdminsChecklist({
+    agendamentoId: checklist.agendamento_id,
+    mecanicoId:    checklist.mecanico_id,
+    respostas,
+    meta:          _meta ?? {},
+  }).catch(err =>
+    console.warn('[Sync] Falha ao notificar admins sobre checklist:', err.message)
+  );
+}
+
+/**
+ * Envia notificação de conclusão de preventiva para todos os superadmins.
+ * Chamado de forma não-bloqueante (fire-and-forget) em syncChecklist.
+ *
+ * Usa os metadados `_meta` gravados pelo Checklist.jsx no payload da fila
+ * para evitar queries extras. Se não disponíveis, faz queries pontuais.
+ */
+async function notificarAdminsChecklist({ agendamentoId, mecanicoId, respostas, meta }) {
+  // Busca admins e, se necessário, nomes do equipamento e do mecânico
+  const promises = [
+    supabase.from('usuarios').select('id').eq('role', 'superadmin'),
+  ];
+
+  // Se os metadados já vieram no payload (caso normal), não precisamos
+  // de queries extras. Caso contrário, buscamos do banco.
+  const precisaNomes = !meta?.equip_nome || !meta?.mec_nome;
+  if (precisaNomes) {
+    promises.push(
+      supabase
+        .from('agendamentos_preventivos')
+        .select('equipamentos(nome)')
+        .eq('id', agendamentoId)
+        .single(),
+      supabase
+        .from('usuarios')
+        .select('nome_completo')
+        .eq('id', mecanicoId)
+        .single()
+    );
+  }
+
+  const results = await Promise.all(promises);
+  const admins  = results[0].data ?? [];
+
+  if (admins.length === 0) return;
+
+  const equipNome = meta?.equip_nome || results[1]?.data?.equipamentos?.nome || 'Equipamento';
+  const mecNome   = meta?.mec_nome   || results[2]?.data?.nome_completo       || 'Mecânico';
+
+  const naoConf = (respostas ?? []).filter(r => r.status_resposta === 'correcao').length;
+  const mensagem = naoConf > 0
+    ? `${mecNome} concluiu a preventiva de "${equipNome}" com ${naoConf} item(ns) não conforme(s).`
+    : `${mecNome} concluiu a preventiva de "${equipNome}" com sucesso.`;
+
+  await supabase.from('notificacoes').insert(
+    admins.map(admin => ({
+      user_id:  admin.id,
+      tipo:     'preventiva_concluida',
+      titulo:   'Preventiva concluída',
+      mensagem,
+      link:     '/preventivas',
+      lida:     false,
+    }))
+  );
 }
 
 // ─────────────────────────────────────────────────────────────

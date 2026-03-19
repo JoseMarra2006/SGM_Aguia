@@ -8,6 +8,11 @@
 //   • `podeFinz` exige todos respondidos
 //   • Correção: `usuarios!mecanico_id` para evitar ambiguidade de FK
 //   • Cores: #20643F (verde)
+//   • FIX v2: substituído upsert (sem constraint) por insert simples em checklist_respostas
+//   • FIX v3:
+//       - Agendamento marcado como 'concluido' ANTES das demais operações (evita ficar pendente)
+//       - Auto-healing no load: detecta checklist finalizado com status desatualizado e corrige
+//       - Notificação aos admins ao concluir (online e offline via sync.js)
 
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -33,16 +38,16 @@ function fmtDuracao(s) {
 }
 
 // ─── Ícones inline ────────────────────────────────────────────
-const IcoBack  = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
-const IcoClock = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><path d="M12 6v6l4 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
-const IcoPlay  = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>;
-const IcoCheck = ({ c = 'currentColor' }) => <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
-const IcoAlert = ({ c = '#EF4444' }) => <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke={c} strokeWidth="2" strokeLinecap="round"/><path d="M12 9v4M12 17h.01" stroke={c} strokeWidth="2" strokeLinecap="round"/></svg>;
-const IcoObs   = ({ on }) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke={on ? '#20643F' : '#94A3B8'} strokeWidth="2" fill={on ? 'rgba(32,100,63,.08)' : 'none'}/></svg>;
-const IcoWifi  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.8M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
-const IcoList  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/><path d="M9 12h6M9 16h4" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/></svg>;
+const IcoBack   = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IcoClock  = () => <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><path d="M12 6v6l4 2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
+const IcoPlay   = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>;
+const IcoCheck  = ({ c = 'currentColor' }) => <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M20 6L9 17l-5-5" stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+const IcoAlert  = ({ c = '#EF4444' }) => <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke={c} strokeWidth="2" strokeLinecap="round"/><path d="M12 9v4M12 17h.01" stroke={c} strokeWidth="2" strokeLinecap="round"/></svg>;
+const IcoObs    = ({ on }) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke={on ? '#20643F' : '#94A3B8'} strokeWidth="2" fill={on ? 'rgba(32,100,63,.08)' : 'none'}/></svg>;
+const IcoWifi   = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.8M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>;
+const IcoList   = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/><path d="M9 12h6M9 16h4" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/></svg>;
 const IcoWrench = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/></svg>;
-const Spinner  = () => <span style={{ display: 'inline-block', width: 15, height: 15, border: '2px solid rgba(255,255,255,.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin .7s linear infinite', marginRight: 8 }}/>;
+const Spinner   = () => <span style={{ display: 'inline-block', width: 15, height: 15, border: '2px solid rgba(255,255,255,.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin .7s linear infinite', marginRight: 8 }}/>;
 
 // ─── Aviso contextual ─────────────────────────────────────────
 const AVISO_CORES = {
@@ -53,7 +58,11 @@ const AVISO_CORES = {
 };
 function Aviso({ tipo, texto }) {
   const c = AVISO_CORES[tipo] ?? AVISO_CORES.info;
-  return <div style={{ padding: '13px 16px', backgroundColor: c.bg, border: `1px solid ${c.bd}`, borderRadius: 10, fontSize: 13, color: c.c, fontWeight: 500, lineHeight: 1.5 }}>{texto}</div>;
+  return (
+    <div style={{ padding: '13px 16px', backgroundColor: c.bg, border: `1px solid ${c.bd}`, borderRadius: 10, fontSize: 13, color: c.c, fontWeight: 500, lineHeight: 1.5 }}>
+      {texto}
+    </div>
+  );
 }
 
 // ─── Item de Checklist de Peça (equipamento) ──────────────────
@@ -86,9 +95,13 @@ function ItemChecklistPeca({ peca, resposta, onMarcar, onObs, disabled }) {
         ))}
       </div>
       {(obsOpen || resposta?.observacao) && resposta && (
-        <textarea placeholder="Observação sobre esta peça (opcional)..." value={resposta.observacao ?? ''} onChange={e => onObs(peca.id, e.target.value)}
+        <textarea
+          placeholder="Observação sobre esta peça (opcional)..."
+          value={resposta.observacao ?? ''}
+          onChange={e => onObs(peca.id, e.target.value)}
           style={{ padding: '10px 12px', fontSize: 13, border: '1.5px solid #E2E8F0', borderRadius: 8, backgroundColor: '#F8FAFC', fontFamily: 'inherit', color: '#374151', width: '100%', boxSizing: 'border-box', lineHeight: 1.5, resize: 'vertical' }}
-          rows={2} maxLength={300} disabled={disabled} />
+          rows={2} maxLength={300} disabled={disabled}
+        />
       )}
     </div>
   );
@@ -104,9 +117,7 @@ function ItemChecklistAdmin({ item, idx, resposta, onMarcar, onObs, disabled }) 
   return (
     <div style={{ backgroundColor: '#fff', borderRadius: 10, border: '1px solid #E8EDF2', borderLeft: `4px solid ${cor}`, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: '#0D1B2A' }}>{item}</span>
-        </div>
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#0D1B2A', flex: 1 }}>{item}</span>
         {resposta && (
           <button onClick={() => setObsOpen(v => !v)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, border: '1px solid #E2E8F0', borderRadius: 7, background: 'none', cursor: 'pointer' }}>
             <IcoObs on={!!resposta.observacao || obsOpen} />
@@ -126,9 +137,13 @@ function ItemChecklistAdmin({ item, idx, resposta, onMarcar, onObs, disabled }) 
         ))}
       </div>
       {(obsOpen || resposta?.observacao) && resposta && (
-        <textarea placeholder="Observação sobre este item (opcional)..." value={resposta.observacao ?? ''} onChange={e => onObs(idx, e.target.value)}
+        <textarea
+          placeholder="Observação sobre este item (opcional)..."
+          value={resposta.observacao ?? ''}
+          onChange={e => onObs(idx, e.target.value)}
           style={{ padding: '10px 12px', fontSize: 13, border: '1.5px solid #E2E8F0', borderRadius: 8, backgroundColor: '#F8FAFC', fontFamily: 'inherit', color: '#374151', width: '100%', boxSizing: 'border-box', lineHeight: 1.5, resize: 'vertical' }}
-          rows={2} maxLength={300} disabled={disabled} />
+          rows={2} maxLength={300} disabled={disabled}
+        />
       )}
     </div>
   );
@@ -146,7 +161,10 @@ function TelaConcluido({ equipamento, duracao, naoConformes, offline, onVoltar }
         <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: '#0D1B2A', letterSpacing: '-0.3px' }}>Preventiva concluída!</h2>
         <p style={{ margin: 0, fontSize: 14, color: '#64748B', textAlign: 'center' }}>{equipamento}</p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, padding: '16px 0', borderTop: '1px solid #F1F5F9', borderBottom: '1px solid #F1F5F9', width: '100%', justifyContent: 'center' }}>
-          {[{ v: duracao, l: 'Duração' }, { v: naoConformes, l: 'Não conformes', cor: naoConformes > 0 ? '#EF4444' : '#10B981' }].map((s, i) => (
+          {[
+            { v: duracao,      l: 'Duração' },
+            { v: naoConformes, l: 'Não conformes', cor: naoConformes > 0 ? '#EF4444' : '#10B981' },
+          ].map((s, i) => (
             <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
               <span style={{ fontSize: 24, fontWeight: 800, color: s.cor ?? '#0D1B2A', fontVariantNumeric: 'tabular-nums' }}>{s.v}</span>
               <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{s.l}</span>
@@ -213,23 +231,22 @@ export default function Checklist() {
   const { isOnline, addChecklistToQueue } = useAppStore();
 
   const [ag,       setAg]       = useState(null);
-  const [pecas,    setPecas]    = useState([]);   // pecas_equipamento
+  const [pecas,    setPecas]    = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [erro,     setErro]     = useState(null);
 
   // Fase: 'pre' | 'execucao' | 'concluido'
-  const [fase,        setFase]        = useState('pre');
-  const [checklistId, setChkId]       = useState(null);
-  const [salvando,    setSalvando]    = useState(false);
-  const [erroSalv,    setErroSalv]    = useState('');
-  const [segundos,    setSegundos]    = useState(0);
+  const [fase,        setFase]     = useState('pre');
+  const [checklistId, setChkId]    = useState(null);
+  const [salvando,    setSalvando] = useState(false);
+  const [erroSalv,    setErroSalv] = useState('');
+  const [segundos,    setSegundos] = useState(0);
 
-  // Respostas das peças do equipamento: { [pecaId]: { status, observacao } }
-  const [respostas,       setRespostas]       = useState({});
-  // Respostas dos itens do admin: { [idx]: { status, observacao } }
-  const [respostasAdmin,  setRespostasAdmin]  = useState({});
-  // Observação geral de texto livre
-  const [obsGeral,        setObsGeral]        = useState('');
+  // { [pecaId]: { status, observacao } }
+  const [respostas,      setRespostas]      = useState({});
+  // { [idx]: { status, observacao } }
+  const [respostasAdmin, setRespostasAdmin] = useState({});
+  const [obsGeral,       setObsGeral]       = useState('');
 
   const timerRef  = useRef(null);
   const inicioRef = useRef(null);
@@ -239,8 +256,7 @@ export default function Checklist() {
     (async () => {
       setLoading(true); setErro(null);
       try {
-        // Inclui itens_checklist e corrige FK para usuários
-        const { data: agd, error: e1 } = await supabase
+        const { data: agdRaw, error: e1 } = await supabase
           .from('agendamentos_preventivos')
           .select(`
             id, data_agendada, status, mecanico_id, itens_checklist,
@@ -250,9 +266,30 @@ export default function Checklist() {
           .eq('id', agendamentoId)
           .single();
         if (e1) throw e1;
+
+        // ── Auto-healing ────────────────────────────────────────────────────
+        // Se existe um checklist com fim_em preenchido (concluído) mas o
+        // agendamento ainda está como pendente/em_andamento (falha parcial
+        // anterior), corrige o status silenciosamente antes de continuar.
+        let agd = agdRaw;
+        if (agd.status !== 'concluido') {
+          const { data: chkFinalizado } = await supabase
+            .from('checklists')
+            .select('id')
+            .eq('agendamento_id', agendamentoId)
+            .not('fim_em', 'is', null)
+            .maybeSingle();
+
+          if (chkFinalizado) {
+            await supabase
+              .from('agendamentos_preventivos')
+              .update({ status: 'concluido' })
+              .eq('id', agendamentoId);
+            agd = { ...agd, status: 'concluido' };
+          }
+        }
         setAg(agd);
 
-        // Peças do equipamento
         const { data: ps, error: e2 } = await supabase
           .from('pecas_equipamento')
           .select('id, nome')
@@ -261,42 +298,44 @@ export default function Checklist() {
         if (e2) throw e2;
         setPecas(ps ?? []);
 
-        // Verifica checklist já iniciado (continuação)
-        const { data: chkEx } = await supabase
-          .from('checklists')
-          .select('id, inicio_em, obs_geral')
-          .eq('agendamento_id', agendamentoId)
-          .is('fim_em', null)
-          .maybeSingle();
+        // Verifica checklist em andamento para continuação.
+        // Só busca se o agendamento não estiver concluído (evita entrar em
+        // fase 'execucao' para um checklist já finalizado).
+        if (agd.status !== 'concluido') {
+          const { data: chkEx } = await supabase
+            .from('checklists')
+            .select('id, inicio_em, obs_geral')
+            .eq('agendamento_id', agendamentoId)
+            .is('fim_em', null)
+            .maybeSingle();
 
-        if (chkEx) {
-          setChkId(chkEx.id);
-          inicioRef.current = new Date(chkEx.inicio_em).getTime();
-          setFase('execucao');
+          if (chkEx) {
+            setChkId(chkEx.id);
+            inicioRef.current = new Date(chkEx.inicio_em).getTime();
+            setFase('execucao');
 
-          // Restaura respostas de peças
-          const { data: rr } = await supabase
-            .from('checklist_respostas')
-            .select('peca_equipamento_id, status_resposta, observacao')
-            .eq('checklist_id', chkEx.id);
-          if (rr) {
-            const m = {};
-            rr.forEach(r => { m[r.peca_equipamento_id] = { status: r.status_resposta, observacao: r.observacao ?? '' }; });
-            setRespostas(m);
-          }
+            const { data: rr } = await supabase
+              .from('checklist_respostas')
+              .select('peca_equipamento_id, status_resposta, observacao')
+              .eq('checklist_id', chkEx.id);
+            if (rr) {
+              const m = {};
+              rr.forEach(r => { m[r.peca_equipamento_id] = { status: r.status_resposta, observacao: r.observacao ?? '' }; });
+              setRespostas(m);
+            }
 
-          // Restaura respostas admin (se salvas em obs_geral JSON)
-          if (chkEx.obs_geral) {
-            try {
-              const parsed = JSON.parse(chkEx.obs_geral);
-              if (parsed._itens_admin) {
-                const mAdmin = {};
-                parsed._itens_admin.forEach((it, idx) => { mAdmin[idx] = { status: it.status, observacao: it.obs ?? '' }; });
-                setRespostasAdmin(mAdmin);
+            if (chkEx.obs_geral) {
+              try {
+                const parsed = JSON.parse(chkEx.obs_geral);
+                if (parsed._itens_admin) {
+                  const mAdmin = {};
+                  parsed._itens_admin.forEach((it, idx) => { mAdmin[idx] = { status: it.status, observacao: it.obs ?? '' }; });
+                  setRespostasAdmin(mAdmin);
+                }
+                if (parsed._obs_usuario) setObsGeral(parsed._obs_usuario);
+              } catch {
+                setObsGeral(chkEx.obs_geral ?? '');
               }
-              if (parsed._obs_usuario) setObsGeral(parsed._obs_usuario);
-            } catch {
-              setObsGeral(chkEx.obs_geral ?? '');
             }
           }
         }
@@ -326,11 +365,10 @@ export default function Checklist() {
   const jaConcluido = ag?.status === 'concluido';
   const podeIniciar = ag?.data_agendada <= hoje && ag?.status === 'pendente';
 
-  const itensAdmin  = ag?.itens_checklist ?? [];   // string[]
-  const temItens    = itensAdmin.length > 0;
-  const temPecas    = pecas.length > 0;
+  const itensAdmin = ag?.itens_checklist ?? [];
+  const temItens   = itensAdmin.length > 0;
+  const temPecas   = pecas.length > 0;
 
-  // Contagem de sem-resposta (ambos os tipos)
   const semRespostaPecas = pecas.filter(p => !respostas[p.id]?.status);
   const semRespostaAdmin = itensAdmin.filter((_, idx) => !respostasAdmin[idx]?.status);
   const totalItens       = pecas.length + itensAdmin.length;
@@ -340,24 +378,61 @@ export default function Checklist() {
   const podeFinz         = semRespostaPecas.length === 0 && semRespostaAdmin.length === 0 && totalItens > 0;
 
   // ─── Ações de resposta ────────────────────────────────────
-  const marcarPeca  = (id, status)  => setRespostas(p => ({ ...p, [id]:  { ...p[id],  status, observacao: p[id]?.observacao ?? '' } }));
+  const marcarPeca  = (id, status)  => setRespostas(p => ({ ...p, [id]:  { ...p[id],  status, observacao: p[id]?.observacao  ?? '' } }));
   const setObsPeca  = (id, obs)     => setRespostas(p => ({ ...p, [id]:  { ...p[id],  observacao: obs } }));
   const marcarAdmin = (idx, status) => setRespostasAdmin(p => ({ ...p, [idx]: { ...p[idx], status, observacao: p[idx]?.observacao ?? '' } }));
   const setObsAdmin = (idx, obs)    => setRespostasAdmin(p => ({ ...p, [idx]: { ...p[idx], observacao: obs } }));
 
-  // ─── Serializa obs_geral com dados dos itens admin ────────
+  // ─── Serializa obs_geral ──────────────────────────────────
   function buildObsGeral() {
     const payload = {};
     if (obsGeral.trim()) payload._obs_usuario = obsGeral.trim();
     if (itensAdmin.length > 0) {
       payload._itens_admin = itensAdmin.map((item, idx) => ({
         item,
-        status:     respostasAdmin[idx]?.status ?? 'ok',
-        obs:        respostasAdmin[idx]?.observacao ?? '',
+        status: respostasAdmin[idx]?.status ?? 'ok',
+        obs:    respostasAdmin[idx]?.observacao ?? '',
       }));
     }
     return Object.keys(payload).length > 0 ? JSON.stringify(payload) : null;
   }
+
+  // ─── Notifica superadmins ─────────────────────────────────
+  // Fire-and-forget: falha interna não propaga para o fluxo principal.
+  const notificarAdmins = async () => {
+    try {
+      const { data: admins } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('role', 'superadmin');
+
+      if (!admins || admins.length === 0) return;
+
+      const equipNome = ag?.equipamentos?.nome ?? 'Equipamento';
+      const mecNome   = ag?.mecanico?.nome_completo ?? profile?.nome_completo ?? 'Mecânico';
+      const naoConf   = [
+        ...Object.values(respostas),
+        ...Object.values(respostasAdmin),
+      ].filter(r => r.status === 'correcao').length;
+
+      const mensagem = naoConf > 0
+        ? `${mecNome} concluiu a preventiva de "${equipNome}" com ${naoConf} item(ns) não conforme(s).`
+        : `${mecNome} concluiu a preventiva de "${equipNome}" com sucesso.`;
+
+      await supabase.from('notificacoes').insert(
+        admins.map(admin => ({
+          user_id:  admin.id,
+          tipo:     'preventiva_concluida',
+          titulo:   'Preventiva concluída',
+          mensagem,
+          link:     '/preventivas',
+          lida:     false,
+        }))
+      );
+    } catch (err) {
+      console.warn('[Checklist] Falha ao notificar admins:', err.message);
+    }
+  };
 
   // ─── Iniciar checklist ───────────────────────────────────
   const iniciar = async () => {
@@ -379,33 +454,50 @@ export default function Checklist() {
       setChkId(data.id);
       inicioRef.current = new Date(data.inicio_em).getTime();
       setFase('execucao');
-      await supabase.from('agendamentos_preventivos').update({ status: 'em_andamento' }).eq('id', agendamentoId);
+      await supabase
+        .from('agendamentos_preventivos')
+        .update({ status: 'em_andamento' })
+        .eq('id', agendamentoId);
     } catch (e) {
       setErroSalv('Erro ao iniciar o checklist. Tente novamente.');
+      console.error('[Checklist] iniciar:', e.message);
     } finally {
       setSalvando(false);
     }
   };
 
   // ─── Finalizar checklist ─────────────────────────────────
+  //
+  // ORDEM CRÍTICA DE OPERAÇÕES:
+  //   1. Marcar agendamento como 'concluido' → PRIORITÁRIO.
+  //      Feito antes de tudo: garante que mesmo se os passos seguintes
+  //      falharem, o agendamento não fique preso como pendente e o
+  //      checklist não possa ser refeito indevidamente.
+  //   2. Atualizar fim_em no registro do checklist.
+  //   3. Inserir respostas das peças (INSERT simples — sem upsert,
+  //      pois não existe constraint única em checklist_id+peca_id).
+  //   4. Notificar admins (fire-and-forget — falha não bloqueia a UI).
   const finalizar = async () => {
     if (!podeFinz) {
-      const faltam = semRespostaPecas.length + semRespostaAdmin.length;
-      setErroSalv(`Responda todos os itens. Faltam ${faltam}.`);
+      setErroSalv(`Responda todos os itens. Faltam ${semRespostaPecas.length + semRespostaAdmin.length}.`);
       return;
     }
+    if (salvando) return; // guard duplo-submit
+
     setSalvando(true); setErroSalv('');
     clearInterval(timerRef.current);
 
     const obsGeralFinal = buildObsGeral();
-    const isOffline = !isOnline || String(checklistId).startsWith('offline-');
+    const isOffline     = !isOnline || String(checklistId).startsWith('offline-');
 
     if (isOffline) {
       const localId = String(checklistId).startsWith('offline-')
         ? checklistId.replace('offline-', '')
         : crypto.randomUUID();
       await addChecklistToQueue({
-        localId, type: 'checklist_completo', createdAt: Date.now(),
+        localId,
+        type:      'checklist_completo',
+        createdAt: Date.now(),
         payload: {
           checklist: {
             agendamento_id: agendamentoId,
@@ -418,6 +510,11 @@ export default function Checklist() {
             status_resposta:     respostas[p.id]?.status ?? 'ok',
             observacao:          respostas[p.id]?.observacao ?? null,
           })),
+          // Metadados usados pelo sync.js para gerar a notificação offline
+          _meta: {
+            equip_nome: ag?.equipamentos?.nome ?? '',
+            mec_nome:   ag?.mecanico?.nome_completo ?? profile?.nome_completo ?? '',
+          },
         },
       });
       setSalvando(false);
@@ -426,34 +523,46 @@ export default function Checklist() {
     }
 
     try {
-      // 1. Finaliza checklist
-      const { error: e1 } = await supabase.from('checklists')
+      // ── 1. Agendamento → 'concluido' ─────────────────────────────────────
+      const { error: eAg } = await supabase
+        .from('agendamentos_preventivos')
+        .update({ status: 'concluido' })
+        .eq('id', agendamentoId);
+      if (eAg) throw eAg;
+
+      // ── 2. Checklist → fim_em + obs_geral ────────────────────────────────
+      const { error: eChk } = await supabase
+        .from('checklists')
         .update({ fim_em: new Date().toISOString(), obs_geral: obsGeralFinal })
         .eq('id', checklistId);
-      if (e1) throw e1;
+      if (eChk) throw eChk;
 
-      // 2. Upsert respostas de peças (apenas se há peças)
+      // ── 3. Respostas das peças (INSERT simples) ───────────────────────────
       if (pecas.length > 0) {
-        const { error: e2 } = await supabase.from('checklist_respostas').upsert(
-          pecas.map(p => ({
-            checklist_id:        checklistId,
-            peca_equipamento_id: p.id,
-            status_resposta:     respostas[p.id]?.status ?? 'ok',
-            observacao:          respostas[p.id]?.observacao ?? null,
-          })),
-          { onConflict: 'checklist_id,peca_equipamento_id' }
-        );
-        if (e2) throw e2;
+        const { error: eRes } = await supabase
+          .from('checklist_respostas')
+          .insert(
+            pecas.map(p => ({
+              checklist_id:        checklistId,
+              peca_equipamento_id: p.id,
+              status_resposta:     respostas[p.id]?.status ?? 'ok',
+              observacao:          respostas[p.id]?.observacao ?? null,
+            }))
+          );
+        if (eRes) throw eRes;
       }
 
-      // 3. Marca agendamento como concluído
-      const { error: e3 } = await supabase.from('agendamentos_preventivos')
-        .update({ status: 'concluido' }).eq('id', agendamentoId);
-      if (e3) throw e3;
+      // ── 4. Notificação para admins (fire-and-forget) ──────────────────────
+      notificarAdmins();
 
       setFase('concluido');
     } catch (e) {
+      console.error('[Checklist] finalizar:', e.message);
       setErroSalv(`Erro ao finalizar: ${e.message}`);
+      // Reinicia timer para que o usuário possa tentar novamente
+      timerRef.current = setInterval(() => {
+        setSegundos(Math.floor((Date.now() - inicioRef.current) / 1000));
+      }, 1000);
     } finally {
       setSalvando(false);
     }
@@ -500,7 +609,6 @@ export default function Checklist() {
         )}
       </header>
 
-      {/* Banner offline */}
       {!isOnline && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', backgroundColor: '#FEF3C7', color: '#92400E', fontSize: 12, fontWeight: 500, borderBottom: '1px solid rgba(245,158,11,.3)' }}>
           <IcoWifi /> Sem conexão — os dados serão salvos e enviados ao reconectar.
@@ -512,7 +620,6 @@ export default function Checklist() {
         {/* ═══ FASE PRÉ ═══ */}
         {fase === 'pre' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* Informações do agendamento */}
             <div style={{ backgroundColor: '#fff', borderRadius: 12, border: '1px solid #E8EDF2', overflow: 'hidden' }}>
               {[
                 ['Equipamento',       ag?.equipamentos?.nome],
@@ -528,7 +635,6 @@ export default function Checklist() {
               ))}
             </div>
 
-            {/* Prévia dos itens do admin */}
             {itensAdmin.length > 0 && (
               <div style={{ backgroundColor: '#fff', borderRadius: 12, border: '1px solid #E8EDF2', overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', borderBottom: '1px solid #F1F5F9' }}>
@@ -549,13 +655,23 @@ export default function Checklist() {
 
             {jaConcluido && <Aviso tipo="sucesso" texto="Esta preventiva já foi concluída com sucesso." />}
             {!jaConcluido && !isMeu && <Aviso tipo="info" texto="Este agendamento foi atribuído a outro mecânico." />}
-            {!jaConcluido && isMeu && diasR > 0 && <Aviso tipo={diasR <= 3 ? 'alerta' : 'info'} texto={`O checklist só pode ser iniciado em ${fmt(ag?.data_agendada)}. Faltam ${diasR} dia(s).`} />}
-            {!jaConcluido && isMeu && diasR < 0 && <Aviso tipo="erro" texto={`Atrasado ${Math.abs(diasR)} dia(s). Inicie imediatamente.`} />}
-            {!jaConcluido && isMeu && totalItens === 0 && <Aviso tipo="alerta" texto="Nenhum item de checklist cadastrado para este agendamento." />}
+            {!jaConcluido && isMeu && diasR !== null && diasR > 0 && (
+              <Aviso tipo={diasR <= 3 ? 'alerta' : 'info'} texto={`O checklist só pode ser iniciado em ${fmt(ag?.data_agendada)}. Faltam ${diasR} dia(s).`} />
+            )}
+            {!jaConcluido && isMeu && diasR !== null && diasR < 0 && (
+              <Aviso tipo="erro" texto={`Atrasado ${Math.abs(diasR)} dia(s). Inicie imediatamente.`} />
+            )}
+            {!jaConcluido && isMeu && totalItens === 0 && (
+              <Aviso tipo="alerta" texto="Nenhum item de checklist cadastrado para este agendamento." />
+            )}
 
             {!jaConcluido && isMeu && podeIniciar && totalItens > 0 && (
               <>
-                {erroSalv && <div style={{ padding: '12px 14px', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 9, fontSize: 13, color: '#DC2626' }}>{erroSalv}</div>}
+                {erroSalv && (
+                  <div style={{ padding: '12px 14px', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 9, fontSize: 13, color: '#DC2626' }}>
+                    {erroSalv}
+                  </div>
+                )}
                 <button onClick={iniciar} disabled={salvando}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 15, width: '100%', backgroundColor: '#20643F', color: '#fff', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', opacity: salvando ? 0.7 : 1 }}>
                   {salvando ? <><Spinner />Iniciando...</> : <><IcoPlay />Iniciar checklist</>}
@@ -581,58 +697,48 @@ export default function Checklist() {
               <span style={{ fontSize: 11, color: '#94A3B8' }}>{totalRespondidos} de {totalItens} respondidos</span>
             </div>
 
-            {/* Seção: Itens definidos pelo Admin */}
+            {/* Itens do Admin */}
             {temItens && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '10px 14px', backgroundColor: 'rgba(32,100,63,0.06)', borderRadius: 10, border: '1px solid rgba(32,100,63,0.15)' }}>
                   <IcoList />
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#20643F' }}>
-                    Pontos do Checklist ({itensAdmin.length})
-                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#20643F' }}>Pontos do Checklist ({itensAdmin.length})</span>
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: '#20643F', fontWeight: 600 }}>
                     {Object.values(respostasAdmin).filter(r => r.status).length}/{itensAdmin.length} ✓
                   </span>
                 </div>
                 {itensAdmin.map((item, idx) => (
                   <ItemChecklistAdmin
-                    key={idx}
-                    item={item}
-                    idx={idx}
+                    key={idx} item={item} idx={idx}
                     resposta={respostasAdmin[idx]}
-                    onMarcar={marcarAdmin}
-                    onObs={setObsAdmin}
+                    onMarcar={marcarAdmin} onObs={setObsAdmin}
                     disabled={salvando}
                   />
                 ))}
               </div>
             )}
 
-            {/* Seção: Peças do equipamento */}
+            {/* Peças do equipamento */}
             {temPecas && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '10px 14px', backgroundColor: 'rgba(32,100,63,0.06)', borderRadius: 10, border: '1px solid rgba(32,100,63,0.15)' }}>
                   <IcoWrench />
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#20643F' }}>
-                    Peças do Equipamento ({pecas.length})
-                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#20643F' }}>Peças do Equipamento ({pecas.length})</span>
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: '#20643F', fontWeight: 600 }}>
                     {Object.values(respostas).filter(r => r.status).length}/{pecas.length} ✓
                   </span>
                 </div>
                 {pecas.map(p => (
                   <ItemChecklistPeca
-                    key={p.id}
-                    peca={p}
+                    key={p.id} peca={p}
                     resposta={respostas[p.id]}
-                    onMarcar={marcarPeca}
-                    onObs={setObsPeca}
+                    onMarcar={marcarPeca} onObs={setObsPeca}
                     disabled={salvando}
                   />
                 ))}
               </div>
             )}
 
-            {/* Sem itens (edge case) */}
             {!temItens && !temPecas && (
               <Aviso tipo="alerta" texto="Nenhum item de checklist ou peça cadastrada para este agendamento." />
             )}
@@ -647,9 +753,7 @@ export default function Checklist() {
                 value={obsGeral}
                 onChange={e => setObsGeral(e.target.value)}
                 style={{ padding: 12, fontSize: 14, border: '1.5px solid #E2E8F0', borderRadius: 8, backgroundColor: '#F8FAFC', fontFamily: 'inherit', color: '#0D1B2A', width: '100%', boxSizing: 'border-box', lineHeight: 1.55 }}
-                rows={3}
-                maxLength={500}
-                disabled={salvando}
+                rows={3} maxLength={500} disabled={salvando}
               />
             </div>
 
