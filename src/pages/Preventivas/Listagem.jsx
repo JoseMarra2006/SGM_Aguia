@@ -5,10 +5,13 @@
 //   • Cancelamento de agendamento — disponível para 'pendente' e 'em_andamento'
 //   • ModalConfirmarCancelamento — confirmação antes de cancelar
 //   • Botões de edição/cancelamento em CardAgendamento — APENAS para superadmin
-// INALTERADO: ModalAgendarPreventiva, CardAgendamento (lógica), filtros, abas.
+// ADIÇÕES v4 (QR / Atalhos operacionais):
+//   • ModalAgendarPreventiva aceita defaultEquipamentoId (pré-seleciona equipamento)
+//   • Lê ?agendar=true&equipamento_id=[ID] para abertura automática via QR Code
+// INALTERADO: lógica de agendamento, checklist, filtros, abas.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import useAuthStore from '../../store/authStore';
 
@@ -45,10 +48,10 @@ const SUGESTOES_CHECKLIST = [
 ];
 
 // ─── Modal: Agendar Preventiva (novo agendamento) ─────────────
-function ModalAgendarPreventiva({ onClose, onSucesso }) {
+function ModalAgendarPreventiva({ onClose, onSucesso, defaultEquipamentoId = '' }) {
   const [equipamentos,   setEquipamentos]   = useState([]);
   const [mecanicos,      setMecanicos]      = useState([]);
-  const [equipamentoId,  setEquipamentoId]  = useState('');
+  const [equipamentoId,  setEquipamentoId]  = useState(defaultEquipamentoId);
   const [mecanicoId,     setMecanicoId]     = useState('');
   const [dataAgendada,   setDataAgendada]   = useState('');
   const [itens,          setItens]          = useState([]);
@@ -493,6 +496,7 @@ const ABAS = [
 
 export default function ListagemPreventivas() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { isSuperAdmin, profile } = useAuthStore();
 
   const [agendamentos,  setAgendamentos]  = useState([]);
@@ -506,6 +510,14 @@ export default function ListagemPreventivas() {
   const [modalCancelar,  setModalCancelar]  = useState(null);
   const [cancelando,     setCancelando]     = useState(false);
   const [erroCancelamento, setErroCancelamento] = useState('');
+
+  // ── Abertura automática via QR Code / atalho de Detalhes ────
+  // ?agendar=true&equipamento_id=[ID]
+  useEffect(() => {
+    if (searchParams.get('agendar') === 'true' && isSuperAdmin) {
+      setModalAberto(true);
+    }
+  }, [searchParams, isSuperAdmin]);
 
   const fetchAgendamentos = useCallback(async () => {
     setLoading(true);
@@ -576,6 +588,7 @@ export default function ListagemPreventivas() {
         <ModalAgendarPreventiva
           onClose={() => setModalAberto(false)}
           onSucesso={() => { setModalAberto(false); fetchAgendamentos(); }}
+          defaultEquipamentoId={searchParams.get('equipamento_id') ?? ''}
         />
       )}
       {modalEditar && (

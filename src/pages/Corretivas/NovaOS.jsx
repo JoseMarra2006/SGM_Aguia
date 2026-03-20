@@ -1,17 +1,18 @@
 // src/pages/Corretivas/NovaOS.jsx
-// v2: Sem alterações de lógica — a criação da O.S. já aciona automaticamente:
-//   • trg_log_os_criada       → insere em historico_os
-//   • trg_notif_os_aberta     → notifica admins (existente)
-// Alteração visual mínima: banner informativo do timer e do log automático.
+// ADIÇÕES v3 (QR / Atalhos operacionais):
+//   • Lê ?equipamento_id=[ID] da URL para pré-selecionar o equipamento
+//   • Permite abertura direta via QR Code escaneado na máquina
+// INALTERADO: toda a lógica de criação de OS, validação, offline, layout.
 
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../../services/supabase';
 import useAuthStore from '../../store/authStore';
 import useAppStore from '../../store/appStore';
 
 export default function NovaOS() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { profile, isSuperAdmin } = useAuthStore();
   const { isOnline, addOSToQueue } = useAppStore();
 
@@ -26,6 +27,9 @@ export default function NovaOS() {
   const [salvando, setSalvando]           = useState(false);
   const [erros, setErros]                 = useState({});
   const [erroGlobal, setErroGlobal]       = useState('');
+
+  // ─── Lê equipamento_id da URL (vindo do QR ou do botão de atalho) ──────────
+  const equipFromUrl = searchParams.get('equipamento_id') ?? '';
 
   // ─── Carrega selects ─────────────────────────────────────────
   useEffect(() => {
@@ -45,6 +49,10 @@ export default function NovaOS() {
         if (mecResult?.data) setMecanicos(mecResult.data);
         setSolicitante(profile?.nome_completo ?? '');
         if (!isSuperAdmin) setMecanicoId(profile?.id ?? '');
+
+        // Pré-seleciona equipamento vindo da URL (QR Code / botão de atalho)
+        if (equipFromUrl) setEquipamentoId(equipFromUrl);
+
       } catch (err) {
         console.error('[NovaOS] Erro ao carregar dados:', err.message);
       } finally {
@@ -52,7 +60,7 @@ export default function NovaOS() {
       }
     }
     fetchDados();
-  }, [isSuperAdmin, profile]);
+  }, [isSuperAdmin, profile, equipFromUrl]);
 
   // ─── Validação ────────────────────────────────────────────────
   const validar = () => {
@@ -90,8 +98,6 @@ export default function NovaOS() {
         navigate('/corretivas', { replace: true });
         return;
       }
-      // Ao inserir, o trigger trg_log_os_criada registra em historico_os
-      // e trg_notif_os_aberta notifica os admins — ambos automáticos.
       const { data, error } = await supabase
         .from('ordens_servico').insert(payload).select('id').single();
       if (error) throw error;
@@ -122,6 +128,14 @@ export default function NovaOS() {
       {!isOnline && (
         <div style={S.bannerOffline}>
           <OfflineIcon /> Sem conexão — a OS será salva localmente e enviada ao reconectar.
+        </div>
+      )}
+
+      {/* Banner de pré-seleção via QR */}
+      {equipFromUrl && equipamentos.find(e => e.id === equipFromUrl) && (
+        <div style={S.bannerQR}>
+          <QRSmIcon />
+          Equipamento pré-selecionado via QR Code. Confirme e preencha os demais dados.
         </div>
       )}
 
@@ -239,13 +253,14 @@ function TelaCarregando() {
 }
 
 // ─── Ícones ───────────────────────────────────────────────────
-function BackIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
-function GearIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="#20643F" strokeWidth="1.8"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#20643F" strokeWidth="1.8"/></svg>; }
-function UserIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="4" stroke="#20643F" strokeWidth="2"/></svg>; }
+function BackIcon()    { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
+function GearIcon()    { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="#20643F" strokeWidth="1.8"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#20643F" strokeWidth="1.8"/></svg>; }
+function UserIcon()    { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="4" stroke="#20643F" strokeWidth="2"/></svg>; }
 function AlertIcon({ cor = '#20643F' }) { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke={cor} strokeWidth="2" strokeLinecap="round"/><path d="M12 9v4M12 17h.01" stroke={cor} strokeWidth="2" strokeLinecap="round"/></svg>; }
-function OSIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ marginRight: 7 }}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M14 2v6h6M12 18v-6M9 15h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
+function OSIcon()      { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ marginRight: 7 }}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M14 2v6h6M12 18v-6M9 15h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
 function OfflineIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.8M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function Spinner() { return <span style={{ display: 'inline-block', width: '15px', height: '15px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#FFF', borderRadius: '50%', animation: 'spin 0.7s linear infinite', marginRight: 8 }} />; }
+function QRSmIcon()    { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><rect x="3" y="3" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="2"/><rect x="14" y="3" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="2"/><rect x="3" y="14" width="7" height="7" rx="1" stroke="currentColor" strokeWidth="2"/><path d="M14 14h3v3M17 20h3M20 17v3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
+function Spinner()     { return <span style={{ display: 'inline-block', width: '15px', height: '15px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#FFF', borderRadius: '50%', animation: 'spin 0.7s linear infinite', marginRight: 8 }} />; }
 
 // ─── CSS e Estilos ────────────────────────────────────────────
 const CSS = `
@@ -254,25 +269,26 @@ const CSS = `
   select:focus, input:focus, textarea:focus { outline: none; border-color: #20643F !important; box-shadow: 0 0 0 3px rgba(32,100,63,0.1) !important; }
 `;
 const S = {
-  page:        { minHeight: '100dvh', backgroundColor: '#F4F7FA', fontFamily: "'DM Sans','Segoe UI',sans-serif" },
-  topbar:      { position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: '12px', padding: '0 16px', height: '56px', backgroundColor: '#FFFFFF', borderBottom: '1px solid #E8EDF2' },
-  backBtn:     { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: 'none', background: 'none', cursor: 'pointer', color: '#0D1B2A', borderRadius: '8px', flexShrink: 0 },
-  topbarTitle: { margin: 0, fontSize: '17px', fontWeight: '700', color: '#0D1B2A', letterSpacing: '-0.2px' },
+  page:         { minHeight: '100dvh', backgroundColor: '#F4F7FA', fontFamily: "'DM Sans','Segoe UI',sans-serif" },
+  topbar:       { position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: '12px', padding: '0 16px', height: '56px', backgroundColor: '#FFFFFF', borderBottom: '1px solid #E8EDF2' },
+  backBtn:      { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: 'none', background: 'none', cursor: 'pointer', color: '#0D1B2A', borderRadius: '8px', flexShrink: 0 },
+  topbarTitle:  { margin: 0, fontSize: '17px', fontWeight: '700', color: '#0D1B2A', letterSpacing: '-0.2px' },
   bannerOffline:{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', backgroundColor: '#FEF3C7', color: '#92400E', fontSize: '12px', fontWeight: '500', borderBottom: '1px solid rgba(245,158,11,0.3)' },
-  main:        { padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '640px', margin: '0 auto', boxSizing: 'border-box' },
-  section:     { backgroundColor: '#FFFFFF', borderRadius: '14px', overflow: 'hidden', border: '1px solid #E8EDF2' },
+  bannerQR:     { display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', backgroundColor: 'rgba(32,100,63,0.07)', color: '#20643F', fontSize: '12px', fontWeight: '500', borderBottom: '1px solid rgba(32,100,63,0.2)' },
+  main:         { padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '640px', margin: '0 auto', boxSizing: 'border-box' },
+  section:      { backgroundColor: '#FFFFFF', borderRadius: '14px', overflow: 'hidden', border: '1px solid #E8EDF2' },
   sectionHeader:{ display: 'flex', alignItems: 'center', gap: '8px', padding: '14px 18px', borderBottom: '1px solid #F1F5F9' },
   sectionTitle: { margin: 0, fontSize: '14px', fontWeight: '700', color: '#0D1B2A' },
-  sectionBody: { padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '14px' },
-  formField:   { display: 'flex', flexDirection: 'column', gap: '6px' },
-  label:       { fontSize: '12px', fontWeight: '700', color: '#374151', letterSpacing: '0.2px', textTransform: 'uppercase' },
-  input:       { padding: '12px 14px', fontSize: '14px', border: '1.5px solid #E2E8F0', borderRadius: '9px', backgroundColor: '#FAFBFC', color: '#0D1B2A', fontFamily: 'inherit', boxSizing: 'border-box', width: '100%' },
-  select:      { padding: '12px 14px', fontSize: '14px', border: '1.5px solid #E2E8F0', borderRadius: '9px', backgroundColor: '#FAFBFC', color: '#0D1B2A', fontFamily: 'inherit', boxSizing: 'border-box', width: '100%', cursor: 'pointer' },
-  textarea:    { padding: '12px 14px', fontSize: '14px', border: '1.5px solid #E2E8F0', borderRadius: '9px', backgroundColor: '#FAFBFC', color: '#0D1B2A', fontFamily: 'inherit', boxSizing: 'border-box', width: '100%', lineHeight: 1.55 },
-  inputError:  { borderColor: '#FCA5A5', backgroundColor: '#FFF5F5' },
-  fieldError:  { fontSize: '12px', color: '#EF4444', fontWeight: '500' },
-  charCount:   { fontSize: '11px', color: '#94A3B8', textAlign: 'right', marginTop: '-8px' },
-  erroGlobal:  { display: 'flex', alignItems: 'center', gap: '8px', padding: '13px 14px', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '9px', fontSize: '13px', color: '#DC2626' },
-  btnSubmit:   { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '15px', width: '100%', backgroundColor: '#20643F', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '15px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
-  aviso:       { margin: 0, textAlign: 'center', fontSize: '12px', color: '#94A3B8', paddingBottom: '16px' },
+  sectionBody:  { padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '14px' },
+  formField:    { display: 'flex', flexDirection: 'column', gap: '6px' },
+  label:        { fontSize: '12px', fontWeight: '700', color: '#374151', letterSpacing: '0.2px', textTransform: 'uppercase' },
+  input:        { padding: '12px 14px', fontSize: '14px', border: '1.5px solid #E2E8F0', borderRadius: '9px', backgroundColor: '#FAFBFC', color: '#0D1B2A', fontFamily: 'inherit', boxSizing: 'border-box', width: '100%' },
+  select:       { padding: '12px 14px', fontSize: '14px', border: '1.5px solid #E2E8F0', borderRadius: '9px', backgroundColor: '#FAFBFC', color: '#0D1B2A', fontFamily: 'inherit', boxSizing: 'border-box', width: '100%', cursor: 'pointer' },
+  textarea:     { padding: '12px 14px', fontSize: '14px', border: '1.5px solid #E2E8F0', borderRadius: '9px', backgroundColor: '#FAFBFC', color: '#0D1B2A', fontFamily: 'inherit', boxSizing: 'border-box', width: '100%', lineHeight: 1.55 },
+  inputError:   { borderColor: '#FCA5A5', backgroundColor: '#FFF5F5' },
+  fieldError:   { fontSize: '12px', color: '#EF4444', fontWeight: '500' },
+  charCount:    { fontSize: '11px', color: '#94A3B8', textAlign: 'right', marginTop: '-8px' },
+  erroGlobal:   { display: 'flex', alignItems: 'center', gap: '8px', padding: '13px 14px', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '9px', fontSize: '13px', color: '#DC2626' },
+  btnSubmit:    { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '15px', width: '100%', backgroundColor: '#20643F', color: '#FFFFFF', border: 'none', borderRadius: '12px', fontSize: '15px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
+  aviso:        { margin: 0, textAlign: 'center', fontSize: '12px', color: '#94A3B8', paddingBottom: '16px' },
 };
