@@ -1,14 +1,12 @@
 // src/pages/Login/Login.jsx
-// ALTERAÇÕES VISUAIS (migração final azul → verde):
-//   • Import do logo real da empresa via ../../assets/logo_empresa.png
-//   • sidePanel: gradiente #0A3560/#0F4C81/#1A6EB5 → verde escuro (#0D2B1A/#20643F/#2E8B57)
-//   • logoMark SVG substituído por <img src={logoEmpresa} /> (ambos os painéis)
-//   • formEyebrow: color #0F4C81 → #20643F
-//   • btn (Login + ChangePassword): backgroundColor #0F4C81 → #20643F
-//   • securityIconWrapper: bg rgba(15,76,129,0.1) → rgba(32,100,63,0.1)
-//   • securityBtn: backgroundColor #0F4C81 → #20643F
-//   • SecurityAlertModal shield SVG: stroke #0F4C81 → #20643F
-//   • RESPONSIVIDADE: logo mobile adicionado acima do form (exibido quando sidePanel oculto)
+// ALTERAÇÕES VISUAIS (migração final azul → verde): paleta #20643F
+// ADIÇÕES v2 (Toggle de visibilidade da senha):
+//   • PasswordInput: wrapper com botão olho (EyeIcon / EyeOffIcon) posicionado absolutamente
+//   • useState show local em PasswordInput — isolado, não interfere em authStore nem submit
+//   • Toggle aplicado ao campo "Senha" do Login e a "Nova senha" / "Confirmar" do ChangePasswordModal
+//   • EyeIcon (olho aberto): cor #94A3B8 — senha oculta
+//   • EyeOffIcon (olho cortado): cor #20643F — senha visível
+//   • paddingRight: '46px' no input garante que o texto não sobreponha o botão
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -25,7 +23,74 @@ function formatCPF(value) {
     .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
 }
 
-// ─── Componente de campo reutilizável ─────────────────────────────────────
+// ─── Ícones de olho ───────────────────────────────────────────────────────
+
+function EyeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"
+        stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx="12" cy="12" r="3"
+        stroke="#94A3B8" strokeWidth="2"/>
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"
+        stroke="#20643F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"
+        stroke="#20643F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M10.73 10.73a3 3 0 0 0 4.24 4.24"
+        stroke="#20643F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M1 1l22 22"
+        stroke="#20643F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+// ─── Campo de senha com toggle de visibilidade ────────────────────────────
+// Estado `show` é local ao componente: não afeta o valor `senha` do pai
+// nem a lógica de submit/authStore. O type do input é derivado de `show`.
+
+function PasswordInput({ label, id, value, onChange, onKeyDown, error, placeholder }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={styles.inputGroup}>
+      <label htmlFor={id} style={styles.label}>{label}</label>
+      <div style={styles.passwordWrapper}>
+        <input
+          id={id}
+          type={show ? 'text' : 'password'}
+          placeholder={placeholder}
+          value={value}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+          style={{
+            ...styles.input,
+            ...(error ? styles.inputError : {}),
+            paddingRight: '46px',
+          }}
+          autoComplete={id === 'senha' ? 'current-password' : 'new-password'}
+        />
+        <button
+          type="button"
+          onClick={() => setShow(v => !v)}
+          style={styles.eyeBtn}
+          tabIndex={-1}
+          aria-label={show ? 'Ocultar senha' : 'Mostrar senha'}
+        >
+          {show ? <EyeOffIcon /> : <EyeIcon />}
+        </button>
+      </div>
+      {error && <span style={styles.fieldError}>{error}</span>}
+    </div>
+  );
+}
+
+// ─── Componente de campo reutilizável (campos não-senha) ──────────────────
 
 function Input({ label, id, error, ...props }) {
   return (
@@ -42,32 +107,25 @@ function Input({ label, id, error, ...props }) {
 }
 
 // ─── Modal de alerta de segurança ─────────────────────────────────────────
-// Exibido após login bem-sucedido para lembrar o usuário de deslogar.
 
 export function SecurityAlertModal({ nomeUsuario, onConfirm }) {
   return (
     <div style={styles.modalOverlay}>
       <div style={{ ...styles.modalBox, ...styles.securityBox }}>
-        {/* Ícone — ALTERADO: bg rgba(15,76,129,0.1) → rgba(32,100,63,0.1) */}
         <div style={styles.securityIconWrapper}>
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
-            {/* ALTERADO: stroke #0F4C81 → #20643F */}
             <path
               d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
-              stroke="#20643F" strokeWidth="2"
-              strokeLinecap="round" strokeLinejoin="round"
+              stroke="#20643F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
             />
             <path
               d="M9 12l2 2 4-4"
-              stroke="#20643F" strokeWidth="2"
-              strokeLinecap="round" strokeLinejoin="round"
+              stroke="#20643F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
             />
           </svg>
         </div>
 
-        <h2 style={styles.securityTitle}>
-          Bem-vindo, {nomeUsuario}!
-        </h2>
+        <h2 style={styles.securityTitle}>Bem-vindo, {nomeUsuario}!</h2>
 
         <p style={styles.securityMsg}>
           Assim que terminar suas tarefas,{' '}
@@ -79,7 +137,6 @@ export function SecurityAlertModal({ nomeUsuario, onConfirm }) {
           O sistema faz logout automático após 24 horas de inatividade.
         </p>
 
-        {/* ALTERADO: backgroundColor #0F4C81 → #20643F */}
         <button onClick={onConfirm} style={styles.securityBtn}>
           Entendido, vamos lá!
         </button>
@@ -92,23 +149,15 @@ export function SecurityAlertModal({ nomeUsuario, onConfirm }) {
 
 function ChangePasswordModal({ onSuccess }) {
   const { changePassword, isLoading, authError, clearAuthError } = useAuthStore();
-  const [novaSenha,  setNovaSenha]  = useState('');
-  const [confirmar,  setConfirmar]  = useState('');
+  const [novaSenha, setNovaSenha] = useState('');
+  const [confirmar, setConfirmar] = useState('');
   const [localError, setLocalError] = useState('');
 
   const handleSubmit = async () => {
     clearAuthError();
     setLocalError('');
-
-    if (novaSenha.length < 8) {
-      setLocalError('A senha deve ter no mínimo 8 caracteres.');
-      return;
-    }
-    if (novaSenha !== confirmar) {
-      setLocalError('As senhas não coincidem.');
-      return;
-    }
-
+    if (novaSenha.length < 8) { setLocalError('A senha deve ter no mínimo 8 caracteres.'); return; }
+    if (novaSenha !== confirmar) { setLocalError('As senhas não coincidem.'); return; }
     const { success } = await changePassword(novaSenha);
     if (success) onSuccess();
   };
@@ -131,25 +180,22 @@ function ChangePasswordModal({ onSuccess }) {
           Este é seu primeiro acesso. Por segurança, defina uma nova senha para continuar.
         </p>
         <div style={styles.modalForm}>
-          <Input
+          <PasswordInput
             label="Nova senha"
             id="nova-senha"
-            type="password"
             placeholder="Mínimo 8 caracteres"
             value={novaSenha}
             onChange={(e) => setNovaSenha(e.target.value)}
           />
-          <Input
+          <PasswordInput
             label="Confirmar nova senha"
             id="confirmar-senha"
-            type="password"
             placeholder="Repita a nova senha"
             value={confirmar}
             onChange={(e) => setConfirmar(e.target.value)}
             error={displayError}
           />
         </div>
-        {/* ALTERADO: backgroundColor #0F4C81 → #20643F */}
         <button
           onClick={handleSubmit}
           disabled={isLoading}
@@ -171,10 +217,8 @@ export default function Login() {
   const [cpf,   setCPF]   = useState('');
   const [senha, setSenha] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
-
   const [modalAtivo, setModalAtivo] = useState(null);
 
-  // ── Validação local ──────────────────────────────────────────────────────
   const validate = () => {
     const errors = {};
     const rawCPF = cpf.replace(/\D/g, '');
@@ -184,15 +228,12 @@ export default function Login() {
     return Object.keys(errors).length === 0;
   };
 
-  // ── Submissão do login ───────────────────────────────────────────────────
   const handleLogin = async () => {
     clearAuthError();
     setFieldErrors({});
     if (!validate()) return;
-
     const rawCPF = cpf.replace(/\D/g, '');
     const result = await loginWithCPF(rawCPF, senha);
-
     if (result?.success) {
       if (result.mustChangePassword) {
         setModalAtivo('changePassword');
@@ -203,9 +244,7 @@ export default function Login() {
     }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') handleLogin();
-  };
+  const handleKeyDown = (e) => { if (e.key === 'Enter') handleLogin(); };
 
   const handlePasswordChanged = () => {
     setShowSecurityAlert(true);
@@ -214,17 +253,10 @@ export default function Login() {
 
   return (
     <div style={styles.page}>
-      {/* Painel lateral decorativo (visível apenas em telas largas) */}
-      {/* ALTERADO: gradiente azul → verde */}
       <div style={styles.sidePanel}>
         <div style={styles.sidePanelInner}>
-          {/* ALTERADO: SVG substituído por logo real da empresa */}
           <div style={styles.logoMark}>
-            <img
-              src={logoEmpresa}
-              alt="SGM Águia"
-              style={styles.logoImgSide}
-            />
+            <img src={logoEmpresa} alt="SGM Águia" style={styles.logoImgSide} />
           </div>
           <h1 style={styles.sideTitle}>Manutenção<br/>Industrial</h1>
           <p style={styles.sideSubtitle}>
@@ -232,30 +264,20 @@ export default function Login() {
           </p>
           <div style={styles.sideDecoGrid}>
             {Array.from({ length: 16 }).map((_, i) => (
-              <div
-                key={i}
-                style={{ ...styles.sideDecoCell, opacity: (i % 5) * 0.1 + 0.1 }}
-              />
+              <div key={i} style={{ ...styles.sideDecoCell, opacity: (i % 5) * 0.1 + 0.1 }} />
             ))}
           </div>
         </div>
       </div>
 
-      {/* Painel do formulário */}
       <div style={styles.formPanel}>
         <div style={styles.formCard}>
 
-          {/* Logo mobile — exibido apenas quando sidePanel está oculto */}
           <div style={styles.logoMobile}>
-            <img
-              src={logoEmpresa}
-              alt="SGM Águia"
-              style={styles.logoImgMobile}
-            />
+            <img src={logoEmpresa} alt="SGM Águia" style={styles.logoImgMobile} />
           </div>
 
           <div style={styles.formHeader}>
-            {/* ALTERADO: color #0F4C81 → #20643F */}
             <p style={styles.formEyebrow}>Acesso ao sistema</p>
             <h2 style={styles.formTitle}>Bem-vindo</h2>
           </div>
@@ -273,19 +295,18 @@ export default function Login() {
               error={fieldErrors.cpf}
               autoComplete="username"
             />
-            <Input
+
+            {/* Campo de senha com toggle de visibilidade */}
+            <PasswordInput
               label="Senha"
               id="senha"
-              type="password"
               placeholder="••••••••"
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
               onKeyDown={handleKeyDown}
               error={fieldErrors.senha}
-              autoComplete="current-password"
             />
 
-            {/* Erro de autenticação */}
             {authError && (
               <div style={styles.authError}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
@@ -296,7 +317,6 @@ export default function Login() {
               </div>
             )}
 
-            {/* ALTERADO: backgroundColor #0F4C81 → #20643F */}
             <button
               onClick={handleLogin}
               disabled={isLoading}
@@ -312,7 +332,6 @@ export default function Login() {
         </div>
       </div>
 
-      {/* Modal de troca obrigatória de senha (primeiro acesso) */}
       {modalAtivo === 'changePassword' && (
         <ChangePasswordModal onSuccess={handlePasswordChanged} />
       )}
@@ -331,7 +350,6 @@ const styles = {
     backgroundColor: '#F8F9FB',
   },
 
-  // ALTERADO: gradiente azul (#0A3560/#0F4C81/#1A6EB5) → verde (#0D2B1A/#20643F/#2E8B57)
   sidePanel: {
     display: isMobile ? 'none' : 'flex',
     flex: '0 0 420px',
@@ -348,16 +366,11 @@ const styles = {
     zIndex: 1,
   },
 
-  // logoMark agora envolve a img (lado esquerdo)
   logoMark: { marginBottom: '32px' },
   logoImgSide: {
-    height: '60px',
-    width: 'auto',
-    objectFit: 'contain',
-    // filtro branco para logo sobre fundo verde escuro
+    height: '60px', width: 'auto', objectFit: 'contain',
     filter: 'brightness(0) invert(1)',
   },
-
   sideTitle: {
     fontSize: '40px', fontWeight: '700', color: '#FFFFFF',
     lineHeight: 1.15, margin: '0 0 16px 0', letterSpacing: '-0.5px',
@@ -381,20 +394,14 @@ const styles = {
   },
   formCard: { width: '100%', maxWidth: '400px' },
 
-  // Logo mobile — visível apenas quando sidePanel oculto
   logoMobile: {
     display: isMobile ? 'flex' : 'none',
     justifyContent: 'center',
     marginBottom: '28px',
   },
-  logoImgMobile: {
-    height: '52px',
-    width: 'auto',
-    objectFit: 'contain',
-  },
+  logoImgMobile: { height: '52px', width: 'auto', objectFit: 'contain' },
 
   formHeader: { marginBottom: '36px' },
-  // ALTERADO: color #0F4C81 → #20643F
   formEyebrow: {
     fontSize: '12px', fontWeight: '600', letterSpacing: '1.5px',
     textTransform: 'uppercase', color: '#20643F', margin: '0 0 8px 0',
@@ -422,7 +429,31 @@ const styles = {
     fontSize: '13px', color: '#DC2626',
   },
 
-  // ALTERADO: backgroundColor #0F4C81 → #20643F
+  // ── Novo: wrapper do campo de senha ──────────────────────────
+  passwordWrapper: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  // Botão olho: posicionado absolutamente à direita, não empurra o layout
+  eyeBtn: {
+    position: 'absolute',
+    right: '14px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '28px',
+    height: '28px',
+    background: 'none',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    padding: 0,
+    WebkitTapHighlightColor: 'transparent',
+  },
+
   btn: {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     width: '100%', padding: '14px', fontSize: '15px', fontWeight: '600',
@@ -442,7 +473,6 @@ const styles = {
     fontSize: '12px', color: '#94A3B8', lineHeight: 1.5,
   },
 
-  // ─── Modal base (troca de senha) ────────────────────────────────────────
   modalOverlay: {
     position: 'fixed', inset: 0,
     backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)',
@@ -468,12 +498,10 @@ const styles = {
   },
   modalForm: { display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' },
 
-  // ─── Modal de segurança ─────────────────────────────────────────────────
   securityBox: {
     display: 'flex', flexDirection: 'column', alignItems: 'center',
     textAlign: 'center', padding: '40px 32px',
   },
-  // ALTERADO: backgroundColor rgba(15,76,129,0.1) → rgba(32,100,63,0.1)
   securityIconWrapper: {
     width: '72px', height: '72px', borderRadius: '50%',
     backgroundColor: 'rgba(32,100,63,0.1)',
@@ -485,14 +513,11 @@ const styles = {
     margin: '0 0 12px 0', letterSpacing: '-0.4px',
   },
   securityMsg: {
-    fontSize: '16px', color: '#374151', margin: '0 0 10px 0',
-    lineHeight: 1.55,
+    fontSize: '16px', color: '#374151', margin: '0 0 10px 0', lineHeight: 1.55,
   },
   securitySub: {
-    fontSize: '13px', color: '#94A3B8', margin: '0 0 28px 0',
-    lineHeight: 1.6,
+    fontSize: '13px', color: '#94A3B8', margin: '0 0 28px 0', lineHeight: 1.6,
   },
-  // ALTERADO: backgroundColor #0F4C81 → #20643F
   securityBtn: {
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     width: '100%', padding: '14px', fontSize: '15px', fontWeight: '700',
