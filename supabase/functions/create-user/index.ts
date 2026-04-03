@@ -1,4 +1,11 @@
 // supabase/functions/create-user/index.ts
+// ALTERAÇÕES v2 (Dummy Email — E-mail opcional):
+//   • Campo `email` agora é opcional no body da requisição
+//   • Se vazio, gera automaticamente: [CPF_LIMPO]@aguia.com.br
+//   • emailFinal é usado tanto no Auth quanto na tabela public.usuarios
+//   • Validação de formato de e-mail aplicada ANTES de gerar o dummy,
+//     garantindo que um e-mail real inválido seja rejeitado com mensagem clara
+// INALTERADO: CORS, validação de role, rollback em caso de falha no DB.
 // Deploy: npx supabase functions deploy create-user --no-verify-jwt
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -6,7 +13,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.7';
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
 const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-app-version',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
@@ -16,6 +23,13 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
   });
+}
+
+// ─── Helper: valida formato de e-mail ────────────────────────────────────────
+// Usado apenas quando o admin preencheu o campo (e-mail real).
+// E-mails dummy são gerados internamente e não passam por esta validação.
+function isEmailValido(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -33,12 +47,12 @@ serve(async (req: Request): Promise<Response> => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const anonKey        = Deno.env.get('SUPABASE_ANON_KEY');
 
-    if (!supabaseUrl)    return jsonResponse({ error: 'SUPABASE_URL ausente no servidor.'          }, 500);
+    if (!supabaseUrl)    return jsonResponse({ error: 'SUPABASE_URL ausente no servidor.'              }, 500);
     if (!serviceRoleKey) return jsonResponse({ error: 'SUPABASE_SERVICE_ROLE_KEY ausente no servidor.' }, 500);
-    if (!anonKey)        return jsonResponse({ error: 'SUPABASE_ANON_KEY ausente no servidor.'     }, 500);
+    if (!anonKey)        return jsonResponse({ error: 'SUPABASE_ANON_KEY ausente no servidor.'         }, 500);
 
     // ── Extração do Bearer token ───────────────────────────────────────────
-    const authHeader = req.headers.get('Authorization') ?? '';
+    const authHeader  = req.headers.get('Authorization') ?? '';
     const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
 
     if (!bearerToken) {
@@ -84,13 +98,13 @@ serve(async (req: Request): Promise<Response> => {
 
     // ── Parse do body ──────────────────────────────────────────────────────
     let body: {
-      email: string;
-      password: string;
-      nome_completo: string;
-      cpf: string;
-      rg?: string | null;
-      nome_mae?: string | null;
-      role: string;
+      email?:         string | null;
+      password:       string;
+      nome_completo:  string;
+      cpf:            string;
+      rg?:            string | null;
+      nome_mae?:      string | null;
+      role:           string;
     };
 
     try {
@@ -99,26 +113,68 @@ serve(async (req: Request): Promise<Response> => {
       return jsonResponse({ error: 'Body da requisição não é JSON válido.' }, 400);
     }
 
-    if (!body.email || !body.password || !body.nome_completo || !body.cpf || !body.role) {
+    // ── Validação dos campos obrigatórios ──────────────────────────────────
+    if (!body.password || !body.nome_completo || !body.cpf || !body.role) {
       return jsonResponse({
-        error: 'Campos obrigatórios ausentes: email, password, nome_completo, cpf, role.',
+        error: 'Campos obrigatórios ausentes: password, nome_completo, cpf, role.',
       }, 400);
     }
 
-    const emailNorm = body.email.trim().toLowerCase();
-    const cpfNorm   = body.cpf.replace(/\D/g, '');
+    // ── Limpeza do CPF (remove pontos, traços e espaços) ──────────────────
+    const cpfLimpo = body.cpf.replace(/\D/g, '');
 
-    console.log('[create-user] Criando usuário no Auth:', emailNorm);
+    if (cpfLimpo.length !== 11) {
+      return jsonResponse({ error: 'CPF inválido. Deve conter 11 dígitos.' }, 400);
+    }
+
+    // ── Lógica do Dummy Email ──────────────────────────────────────────────
+    //
+    // REGRA:
+    //   1. Se o admin NÃO preencheu o e-mail → gera dummy: [CPF]@aguia.com.br
+    //   2. Se o admin preencheu um e-mail → valida formato e usa o e-mail real
+    //
+    // O emailFinal é salvo TANTO no auth.users QUANTO em public.usuarios,
+    // garantindo que a RPC fn_email_por_cpf continue funcionando para o login.
+
+    const emailRaw = (body.email ?? '').trim().toLowerCase();
+
+    let emailFinal: string;
+
+    if (!emailRaw) {
+      // Caso 1: E-mail não fornecido → gera dummy baseado no CPF
+      emailFinal = `${cpfLimpo}@aguia.com.br`;
+      console.log('[create-user] E-mail não fornecido. Usando dummy:', emailFinal);
+    } else {
+      // Caso 2: E-mail fornecido → valida formato antes de usar
+      if (!isEmailValido(emailRaw)) {
+        return jsonResponse({
+          error: 'Formato de e-mail inválido. Verifique o campo e tente novamente.',
+        }, 400);
+      }
+      emailFinal = emailRaw;
+      console.log('[create-user] E-mail real fornecido:', emailFinal);
+    }
+
+    console.log('[create-user] Criando usuário no Auth:', emailFinal);
 
     // ── Criação no Supabase Auth ───────────────────────────────────────────
     const { data: authData, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-      email:         emailNorm,
+      email:         emailFinal,
       password:      body.password,
       email_confirm: true,
     });
 
     if (createErr) {
       console.error('[create-user] Erro no Auth:', createErr.message);
+
+      // Traduz erros comuns para português
+      if (createErr.message.includes('already been registered')) {
+        return jsonResponse({
+          error: 'Este e-mail já está cadastrado no sistema.',
+          step: 'auth',
+        }, 400);
+      }
+
       return jsonResponse({ error: createErr.message, step: 'auth' }, 400);
     }
 
@@ -129,26 +185,32 @@ serve(async (req: Request): Promise<Response> => {
     console.log('[create-user] Auth OK, inserindo perfil:', authData.user.id);
 
     // ── Inserção na tabela usuarios ────────────────────────────────────────
+    // emailFinal é salvo aqui: garante que fn_email_por_cpf retorne o valor
+    // correto (dummy ou real) para o fluxo de login por CPF.
     const { error: dbErr } = await supabaseAdmin
       .from('usuarios')
       .insert({
         id:             authData.user.id,
         nome_completo:  body.nome_completo.trim(),
-        cpf:            cpfNorm,
-        email:          emailNorm,
+        cpf:            cpfLimpo,
+        email:          emailFinal,          // sempre preenchido (dummy ou real)
         role:           body.role,
-        rg:             body.rg?.trim()      || null,
+        rg:             body.rg?.trim()       || null,
         nome_mae:       body.nome_mae?.trim() || null,
         senha_alterada: false,
       });
 
     if (dbErr) {
       console.error('[create-user] Erro no banco:', dbErr.message, '— fazendo rollback...');
+      // Rollback: remove o usuário criado no Auth para evitar órfão
       await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
-      return jsonResponse({ error: `Erro ao salvar perfil: ${dbErr.message}`, step: 'database' }, 400);
+      return jsonResponse({
+        error: `Erro ao salvar perfil: ${dbErr.message}`,
+        step: 'database',
+      }, 400);
     }
 
-    console.log('[create-user] ✅ Sucesso:', authData.user.id);
+    console.log('[create-user] ✅ Sucesso:', authData.user.id, '| email:', emailFinal);
     return jsonResponse({ success: true, userId: authData.user.id });
 
   } catch (err: unknown) {

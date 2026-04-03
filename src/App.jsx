@@ -1,26 +1,30 @@
 // src/App.jsx
 
 import { useEffect, useRef } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import {
+  BrowserRouter, Routes, Route, Navigate,
+  Outlet, useLocation, useNavigate,
+} from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
-import { Dialog } from '@capacitor/dialog';
-import useAuthStore from './store/authStore.js';
-import useAppStore from './store/appStore.js';
-import { initSync } from './services/sync.js';
+import { Dialog }        from '@capacitor/dialog';
+import useAuthStore  from './store/authStore.js';
+import useAppStore   from './store/appStore.js';
+import { supabase }  from './services/supabase.js';
+import { initSync }  from './services/sync.js';
 
 // ─── Importação das Telas ───
-import Login                from './pages/Login/Login.jsx';
-import Painel               from './pages/Dashboard/Painel.jsx';
-import Usuarios             from './pages/Dashboard/Usuarios.jsx';
-import Pecas                from './pages/Dashboard/Pecas.jsx';
-import Listagem             from './pages/Equipamentos/Listagem.jsx';
-import Cadastro             from './pages/Equipamentos/Cadastro.jsx';
-import Detalhe              from './pages/Equipamentos/Detalhes.jsx';
-import ListagemPreventivas  from './pages/Preventivas/Listagem.jsx';
-import Checklist            from './pages/Preventivas/Checklist.jsx';
-import ListagemCorretivas   from './pages/Corretivas/Listagem.jsx';
-import NovaOS               from './pages/Corretivas/NovaOS.jsx';
-import DetalhesOS           from './pages/Corretivas/Detalhes.jsx';
+import Login               from './pages/Login/Login.jsx';
+import Usuarios            from './pages/Dashboard/Usuarios.jsx';
+import Painel              from './pages/Dashboard/Painel.jsx';
+import Pecas               from './pages/Dashboard/Pecas.jsx';
+import Listagem            from './pages/Equipamentos/Listagem.jsx';
+import Cadastro            from './pages/Equipamentos/Cadastro.jsx';
+import Detalhe             from './pages/Equipamentos/Detalhes.jsx';
+import ListagemPreventivas from './pages/Preventivas/Listagem.jsx';
+import Checklist           from './pages/Preventivas/Checklist.jsx';
+import ListagemCorretivas  from './pages/Corretivas/Listagem.jsx';
+import NovaOS              from './pages/Corretivas/NovaOS.jsx';
+import DetalhesOS          from './pages/Corretivas/Detalhes.jsx';
 
 // ─── Tela de carregamento ──────────────────────────────────────────────────
 // Exibida enquanto initAuth verifica se há sessão ativa (F5 / reload).
@@ -81,7 +85,7 @@ function PrivateRoute() {
   const { isAuthenticated, isReady } = useAuthStore();
   const location = useLocation();
 
-  if (!isReady) return <SplashScreen />;
+  if (!isReady)         return <SplashScreen />;
   if (!isAuthenticated) return <Navigate to="/login" state={{ from: location }} replace />;
   return <Outlet />;
 }
@@ -93,7 +97,7 @@ function PrivateRoute() {
 function SuperAdminRoute() {
   const { isSuperAdmin, isReady } = useAuthStore();
 
-  if (!isReady) return <SplashScreen />;
+  if (!isReady)      return <SplashScreen />;
   if (!isSuperAdmin) return <Navigate to="/dashboard" replace />;
   return <Outlet />;
 }
@@ -145,11 +149,9 @@ const ROOT_ROUTES = ['/dashboard', '/login', '/'];
 //    HMR etc.), prevenindo vazamentos de memória.
 
 function BackButtonHandler() {
-  const navigate     = useNavigate();
-  const location     = useLocation();
-  // Ref para capturar sempre a rota mais recente dentro do listener,
-  // sem precisar recriar o listener a cada mudança de rota.
-  const locationRef  = useRef(location);
+  const navigate    = useNavigate();
+  const location    = useLocation();
+  const locationRef = useRef(location);
 
   // Mantém locationRef sincronizado com a rota atual
   useEffect(() => {
@@ -203,6 +205,103 @@ function BackButtonHandler() {
   return null; // Componente sem UI
 }
 
+// ─── Solução 1: AppStateHandler ───────────────────────────────────────────
+//
+// PROBLEMA RAIZ:
+//   Quando o SO pausa o app (background), a interface de rede é suspensa.
+//   O cliente Supabase continua tentando renovar o JWT e manter o WebSocket
+//   do Realtime ativo — falhas que resultam em ERR_NAME_NOT_RESOLVED.
+//   Ao voltar para foreground, o token pode ter expirado e os canais Realtime
+//   estão em estado inconsistente.
+//
+// SOLUÇÃO:
+//   • background  → stopAutoRefresh(): pausa renovação de token (sem rede, sem sentido)
+//   • foreground  → startAutoRefresh(): reinicia renovação e revalida sessão
+//   • foreground  → dispara evento DOM 'app-foreground': qualquer componente
+//                   pode reagir (re-fetch de dados, renovar subscription, etc.)
+//   • foreground  → initSync(): tenta sincronizar filas offline acumuladas
+//
+// COMO REAGIR EM OUTROS COMPONENTES (exemplo):
+//   useEffect(() => {
+//     const onForeground = () => fetchMeusDados();
+//     window.addEventListener('app-foreground', onForeground);
+//     return () => window.removeEventListener('app-foreground', onForeground);
+//   }, []);
+
+function AppStateHandler() {
+  const { isAuthenticated } = useAuthStore();
+
+  useEffect(() => {
+    let handle = null;
+
+    const setup = async () => {
+      handle = await CapApp.addListener('appStateChange', async ({ isActive }) => {
+
+        if (!isActive) {
+          // ── App foi para background ────────────────────────────────────
+          // Para o ciclo de auto-refresh para economizar bateria e evitar
+          // requisições contra uma interface de rede suspensa pelo SO.
+          supabase.auth.stopAutoRefresh();
+          console.log('[AppState] Background → autoRefresh pausado.');
+          return;
+        }
+
+        // ── App voltou para foreground ─────────────────────────────────
+        console.log('[AppState] Foreground → retomando sessão...');
+
+        try {
+          // 1. Reinicia auto-refresh antes de qualquer coisa
+          await supabase.auth.startAutoRefresh();
+
+          // 2. Força a revalidação do token agora, não aguardando o próximo ciclo.
+          //    Se o token expirou durante o background, esta chamada o renova.
+          //    Se a sessão é inválida, retorna session: null → authStore.logout().
+          const { data: { session }, error } = await supabase.auth.getSession();
+
+          if (error) {
+            console.error('[AppState] Erro ao revalidar sessão:', error.message);
+            return;
+          }
+
+          if (!session) {
+            console.warn('[AppState] Sessão expirada durante background.');
+            // O listener onAuthStateChange no authStore tratará o SIGNED_OUT
+            return;
+          }
+
+          // 3. Sinaliza aos componentes que o app voltou ao foreground.
+          //    Painel.jsx e outros podem ouvir este evento para re-buscar dados
+          //    e garantir que suas subscrições Realtime estão ativas.
+          window.dispatchEvent(new CustomEvent('app-foreground'));
+
+          // 4. Tenta sincronizar filas offline (checklists/OS) acumuladas
+          //    enquanto o app estava sem conexão ou em background.
+          initSync().catch((err) =>
+            console.warn('[AppState] Falha ao sincronizar após foreground:', err.message)
+          );
+
+          console.log('[AppState] Foreground → sessão válida, componentes notificados.');
+        } catch (err) {
+          // Não deixa erro não tratado quebrar o handler silenciosamente
+          console.error('[AppState] Erro no handler de foreground:', err.message);
+        }
+      });
+    };
+
+    // Só registra o listener se há uma sessão ativa
+    // (evita overhead em telas de login)
+    if (isAuthenticated) {
+      setup();
+    }
+
+    return () => {
+      if (handle) handle.remove();
+    };
+  }, [isAuthenticated]);
+
+  return null; // Componente sem UI
+}
+
 // ─── Inicializador global ─────────────────────────────────────────────────
 // Componente sem UI que inicializa auth e serviços na montagem inicial.
 // useEffect com [] garante que initAuth rode exatamente uma vez.
@@ -247,16 +346,18 @@ export default function App() {
   return (
     <BrowserRouter>
       {/*
-        AppInitializer e BackButtonHandler são posicionados DENTRO do
-        BrowserRouter para terem acesso ao contexto do React Router.
-        Ambos são componentes sem UI (retornam null).
+        AppInitializer, BackButtonHandler e AppStateHandler são posicionados
+        DENTRO do BrowserRouter para terem acesso ao contexto do React Router.
+        Todos são componentes sem UI (retornam null).
 
         Ordem importa:
-          1. AppInitializer → inicializa auth e serviços
+          1. AppInitializer   → inicializa auth e serviços
           2. BackButtonHandler → registra listener do back button nativo
+          3. AppStateHandler  → resiliência a background/foreground  ← NOVO
       */}
       <AppInitializer />
       <BackButtonHandler />
+      <AppStateHandler />
 
       <Routes>
         {/* Raiz → dashboard */}

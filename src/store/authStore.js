@@ -3,15 +3,16 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { supabase } from '../services/supabase';
+import { CapacitorStorage } from '../services/capacitor-storage.js';
 
 // ─── Constantes ────────────────────────────────────────────────────────────────
 const INATIVIDADE_LIMITE_MS = 24 * 60 * 60 * 1000; // 24 horas em ms
-const STORAGE_KEY = '@sgm:auth';                    // chave no localStorage
+const STORAGE_KEY = '@sgm:auth';                    // chave no CapacitorStorage
 
 // ─── Store com persistência ───────────────────────────────────────────────────
 //
 // ARQUITETURA DE PERSISTÊNCIA:
-//  • O middleware `persist` salva no localStorage apenas os campos de
+//  • O middleware `persist` salva via CapacitorStorage apenas os campos de
 //    `partialize`: profile, isAuthenticated, isSuperAdmin, isMecanico,
 //    mustChangePassword e lastActivity.
 //
@@ -25,14 +26,14 @@ const STORAGE_KEY = '@sgm:auth';                    // chave no localStorage
 //    Isso garante que o estado reidratado não "atropele" a verificação real.
 //
 // FLUXO DE REIDRATAÇÃO (app abre):
-//  1. Zustand reidrata profile/isAuthenticated do localStorage
+//  1. Zustand reidrata profile/isAuthenticated do CapacitorStorage
 //  2. isReady = false → SplashScreen exibida
 //  3. initAuth roda → checa inatividade de 24h → verifica token Supabase
 //  4a. Tudo ok → isReady = true → /dashboard (sem tela de login)
 //  4b. Inativo > 24h OU token inválido → logout → isReady = true → /login
 //
 // SEGURANÇA MULTI-USUÁRIO:
-//  • logout() chama localStorage.removeItem(STORAGE_KEY), garantindo que
+//  • logout() chama CapacitorStorage.removeItem(STORAGE_KEY), garantindo que
 //    nenhum dado do usuário anterior persista para o próximo.
 
 const useAuthStore = create(
@@ -241,7 +242,7 @@ const useAuthStore = create(
       },
 
       // ─── logout ──────────────────────────────────────────────────────────────
-      // Limpa estado em memória E remove o cache persistido do localStorage.
+      // Limpa estado em memória E remove o cache persistido do CapacitorStorage.
       // Essencial para multi-usuário: o próximo usuário começa do zero.
       logout: async () => {
         try {
@@ -265,10 +266,11 @@ const useAuthStore = create(
           _authInitialized:   false,
         });
 
-        // Remove o cache do localStorage — garante que o próximo
-        // usuário não herde nenhum dado do anterior
+        // MIGRAÇÃO: substituído localStorage.removeItem por CapacitorStorage.removeItem.
+        // Garante que o cache de perfil/roles seja removido do armazenamento nativo,
+        // impedindo que o próximo usuário herde dados do anterior.
         try {
-          localStorage.removeItem(STORAGE_KEY);
+          await CapacitorStorage.removeItem(STORAGE_KEY);
         } catch (err) {
           console.warn('[Auth] Erro ao limpar cache persistido:', err.message);
         }
@@ -326,9 +328,13 @@ const useAuthStore = create(
     // ─── Configuração do middleware persist ─────────────────────────────────────
     {
       name: STORAGE_KEY,
-      storage: createJSONStorage(() => localStorage),
+      // MIGRAÇÃO: substituído createJSONStorage(() => localStorage) por
+      // createJSONStorage(() => CapacitorStorage).
+      // CapacitorStorage é assíncrono e compatível com a interface esperada
+      // pelo Zustand persist (getItem / setItem / removeItem retornam Promises).
+      storage: createJSONStorage(() => CapacitorStorage),
 
-      // Apenas estes campos são gravados no localStorage.
+      // Apenas estes campos são gravados no CapacitorStorage.
       // NUNCA persistir: isReady, isLoading, authError, session, _authInitialized
       partialize: (state) => ({
         profile:            state.profile,
@@ -340,7 +346,7 @@ const useAuthStore = create(
       }),
 
       // Hook pós-reidratação: garante que campos voláteis nunca venham do cache.
-      // Chamado assim que o persist termina de ler o localStorage.
+      // Chamado assim que o persist termina de ler o CapacitorStorage.
       onRehydrateStorage: () => (state) => {
         if (state) {
           state.isReady           = false;
