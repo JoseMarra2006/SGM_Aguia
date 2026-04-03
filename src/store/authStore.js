@@ -7,10 +7,12 @@ import { CapacitorStorage } from '../services/capacitor-storage.js';
 
 const INATIVIDADE_LIMITE_MS = 24 * 60 * 60 * 1000;
 const STORAGE_KEY = '@sgm:auth';
-const SAFETY_TIMEOUT_MS = 8000;
 
 /**
  * Aguarda a rehidratação do Zustand ser concluída antes de prosseguir.
+ * Como o CapacitorStorage.getItem agora é síncrono (lê do memoryCache),
+ * a rehidratação ocorre quase instantaneamente — este guard existe apenas
+ * como garantia para casos extremos de inicialização.
  */
 const waitForRehydration = (getState) => {
   return new Promise((resolve) => {
@@ -64,12 +66,10 @@ const useAuthStore = create(
         }
         set({ _authInitialized: true });
 
-        const safetyTimeout = setTimeout(() => {
-          if (!get().isReady) {
-            console.warn('[Auth] safetyTimeout! Forçando liberação do app.');
-            get()._forceLogoutAndReady();
-          }
-        }, SAFETY_TIMEOUT_MS);
+        // REMOVIDO: safetyTimeout — não é mais necessário pois o storage é
+        // síncrono após o warmup. O timeout era a causa do "Estado Zumbi":
+        // forçava isReady=true enquanto o Supabase ainda tentava resolver
+        // sua Promise interna de getSession, deixando o app em estado inconsistente.
 
         const checkSession = async () => {
           try {
@@ -103,7 +103,6 @@ const useAuthStore = create(
             get()._forceLogoutAndReady();
             return;
           } finally {
-            clearTimeout(safetyTimeout);
             set({ isReady: true });
           }
         };
@@ -155,7 +154,6 @@ const useAuthStore = create(
 
         return () => {
           subscription.unsubscribe();
-          clearTimeout(safetyTimeout);
         };
       },
 
