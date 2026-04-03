@@ -5,153 +5,167 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { supabase } from '../services/supabase';
 import { CapacitorStorage } from '../services/capacitor-storage.js';
 
-// ─── Constantes ────────────────────────────────────────────────────────────────
-const INATIVIDADE_LIMITE_MS = 24 * 60 * 60 * 1000; // 24 horas em ms
-const STORAGE_KEY = '@sgm:auth';                    // chave no CapacitorStorage
+const INATIVIDADE_LIMITE_MS = 24 * 60 * 60 * 1000; // 24 horas
+const STORAGE_KEY = '@sgm:auth';
 
-// ─── Store com persistência ───────────────────────────────────────────────────
-//
-// ARQUITETURA DE PERSISTÊNCIA:
-//  • O middleware `persist` salva via CapacitorStorage apenas os campos de
-//    `partialize`: profile, isAuthenticated, isSuperAdmin, isMecanico,
-//    mustChangePassword e lastActivity.
-//
-//  • A sessão JWT NÃO é persistida aqui — o Supabase já faz isso via
-//    `persistSession: true` no cliente (supabase.js). O Zustand persist
-//    guarda somente o estado da UI (perfil, roles) para evitar flash de
-//    tela de login ao reabrir o app.
-//
-//  • isReady NUNCA é persistido. Começa false em todo boot e vira true
-//    apenas após initAuth validar a sessão Supabase em tempo real.
-//    Isso garante que o estado reidratado não "atropele" a verificação real.
-//
-// FLUXO DE REIDRATAÇÃO (app abre):
-//  1. Zustand reidrata profile/isAuthenticated do CapacitorStorage
-//  2. isReady = false → SplashScreen exibida
-//  3. initAuth roda → checa inatividade de 24h → verifica token Supabase
-//  4a. Tudo ok → isReady = true → /dashboard (sem tela de login)
-//  4b. Inativo > 24h OU token inválido → logout → isReady = true → /login
-//
-// SEGURANÇA MULTI-USUÁRIO:
-//  • logout() chama CapacitorStorage.removeItem(STORAGE_KEY), garantindo que
-//    nenhum dado do usuário anterior persista para o próximo.
+/**
+ * Timeout de segurança para o initAuth.
+ *
+ * Deve ser maior do que:
+ *   - Timeout do CapacitorStorage (3s)
+ *   - Tempo esperado de rehidratação do Zustand no Android
+ *   - Tempo de resposta do Supabase em rede móvel
+ *
+ * 8s é conservador mas evita o loop de carregamento infinito em dispositivos lentos.
+ */
+const SAFETY_TIMEOUT_MS = 8000;
+
+/**
+ * Aguarda a rehidratação do Zustand ser concluída antes de prosseguir.
+ * Necessário porque o CapacitorStorage é assíncrono — ao contrário do
+ * localStorage (síncrono), o estado rehidratado pode não estar disponível
+ * imediatamente após a criação do store.
+ *
+ * @param {Function} getState - Função get() do Zustand
+ * @returns {Promise<void>}
+ */
+const waitForRehydration = (getState) => {
+  return new Promise((resolve) => {
+    // Se já rehidratou (isReady foi marcado pelo onRehydrateStorage), resolve imediatamente
+    if (getState()._rehydrated) {
+      resolve();
+      return;
+    }
+
+    // Caso contrário, aguarda até 5s verificando a cada 50ms
+    const maxWait = 5000;
+    const interval = 50;
+    let elapsed = 0;
+
+    const timer = setInterval(() => {
+      elapsed += interval;
+      if (getState()._rehydrated || elapsed >= maxWait) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, interval);
+  });
+};
 
 const useAuthStore = create(
   persist(
     (set, get) => ({
 
-      // ─── Estado ──────────────────────────────────────────────────────────────
+      // ── Estado de sessão ──────────────────────────────────────────────────
       session:            null,
       profile:            null,
-      isReady:            false,   // NUNCA persistido — recalculado no boot
+      isReady:            false,
       authError:          null,
       isLoading:          false,
 
+      // ── Flags derivadas (persistidas) ─────────────────────────────────────
       isAuthenticated:    false,
       isSuperAdmin:       false,
       isMecanico:         false,
       mustChangePassword: false,
 
-      // Timestamp da última atividade confirmada — persistido para checar 24h
+      // ── Controle de inatividade e alertas ─────────────────────────────────
       lastActivity:       null,
-
-      // Flag que sinaliza para o Painel.jsx exibir o alerta de segurança.
-      // O PublicOnlyRoute redireciona para /dashboard antes que qualquer modal
-      // possa ser renderizado no Login.jsx. Esta flag passa o sinal adiante.
-      // NÃO é persistida — só existe durante a sessão de navegação atual.
       showSecurityAlert:  false,
 
-      // Flag interna de idempotência (não persistida)
+      // ── Flags internas (não persistidas) ─────────────────────────────────
       _authInitialized:   false,
+      _rehydrated:        false, // sinalizado pelo onRehydrateStorage após leitura do storage
 
-      // ─── Controle do alerta de segurança ────────────────────────────────────
+      // ── Ações de UI ───────────────────────────────────────────────────────
       setShowSecurityAlert: (valor) => set({ showSecurityAlert: valor }),
 
-      // ─── Atualiza timestamp de atividade ────────────────────────────────────
-      // Chamar sempre que o usuário realizar uma ação significativa.
-      // Já é chamado automaticamente por loginWithCPF e changePassword.
       updateActivity: () => set({ lastActivity: Date.now() }),
 
-      // ─── initAuth ────────────────────────────────────────────────────────────
-      // Chamado UMA vez no AppInitializer (App.jsx). Retorna cleanup.
+      /**
+       * Inicializa o listener de autenticação.
+       * Deve ser chamado uma única vez na montagem do app (ex: App.jsx useEffect).
+       *
+       * Aguarda a rehidratação do storage assíncrono antes de validar a sessão,
+       * evitando a race condition que causava logout indevido no Android.
+       *
+       * @returns {Function} Cleanup — cancelar o listener do Supabase
+       */
       initAuth: () => {
         if (get()._authInitialized) {
           return () => {};
         }
         set({ _authInitialized: true });
 
-        // Failsafe: libera a UI após 3s caso o Supabase não responda
+        // Timeout de segurança: se algo travar, libera o app e faz logout defensivo
         const safetyTimeout = setTimeout(() => {
           if (!get().isReady) {
-            console.warn('[Auth] safetyTimeout acionado — forçando isReady=true.');
-            set({ isReady: true });
+            console.warn('[Auth] safetyTimeout! Forçando liberação do app.');
+            get()._forceLogoutAndReady();
           }
-        }, 3000);
+        }, SAFETY_TIMEOUT_MS);
 
         const checkSession = async () => {
           try {
-            // ── 1. Checa inatividade de 24h ──────────────────────────────────
-            // Feito ANTES de qualquer outra verificação para garantir que
-            // sessões antigas sejam descartadas mesmo com token Supabase válido.
+            // ── CORREÇÃO PRINCIPAL ─────────────────────────────────────────
+            // Aguarda a rehidratação do CapacitorStorage (assíncrono no Android)
+            // antes de ler qualquer estado persistido (isAuthenticated, lastActivity).
+            // Sem isso, lemos valores padrão (false/null) e fazemos logout indevido.
+            await waitForRehydration(get);
+            // ──────────────────────────────────────────────────────────────
+
             const { lastActivity, isAuthenticated } = get();
+
+            // Verifica inatividade apenas se havia sessão persistida
             if (isAuthenticated && lastActivity) {
               const inativo = Date.now() - lastActivity;
               if (inativo > INATIVIDADE_LIMITE_MS) {
-                console.warn('[Auth] Sessão expirada por inatividade (>24h). Fazendo logout.');
-                await get().logout();
-                return; // isReady será setado no finally
+                console.warn('[Auth] Sessão expirada por inatividade.');
+                get()._forceLogoutAndReady();
+                return;
               }
             }
 
-            // ── 2. Verifica sessão ativa no Supabase ─────────────────────────
-            const { data: { session } } = await supabase.auth.getSession();
+            // Valida sessão no Supabase
+            const { data: { session }, error } = await supabase.auth.getSession();
+
+            if (error) throw error;
 
             if (session) {
               set({ session });
               await get()._loadProfile(session.user.id);
-            } else if (get().isAuthenticated) {
-              // Cache diz autenticado mas Supabase não tem sessão
-              // (token expirou com app fechado) → limpa tudo
-              console.warn('[Auth] Sessão Supabase inválida. Limpando estado persistido.');
-              await get().logout();
+            } else if (isAuthenticated) {
+              // Havia cache local mas Supabase não reconhece a sessão → estado zumbi
+              console.warn('[Auth] Sem sessão ativa no Supabase. Limpando cache.');
+              get()._forceLogoutAndReady();
+              return;
             }
           } catch (err) {
             console.error('[Auth] Erro ao recuperar sessão:', err.message);
+            get()._forceLogoutAndReady();
+            return;
           } finally {
             clearTimeout(safetyTimeout);
-            // isReady só vira true aqui — único lugar no fluxo de init
             set({ isReady: true });
           }
         };
 
         checkSession();
 
-        // ── Listener reativo pós-inicialização ───────────────────────────────
-        // Ignora INITIAL_SESSION (tratado por checkSession) e eventos
-        // durante loginWithCPF (isLoading=true).
+        // Listener de mudanças de estado do Supabase (login/logout externo, token refresh etc.)
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
           async (event, session) => {
+            // Ignora o evento inicial — tratado pelo checkSession acima
             if (event === 'INITIAL_SESSION') return;
+            // Não processa se já há uma operação em andamento
             if (get().isLoading) return;
-
-            console.log('[Auth] onAuthStateChange:', event);
 
             if (session) {
               set({ session });
               await get()._loadProfile(session.user.id);
               get().updateActivity();
             } else {
-              // SIGNED_OUT / token expirado: reset completo
-              set({
-                session:            null,
-                profile:            null,
-                isAuthenticated:    false,
-                isSuperAdmin:       false,
-                isMecanico:         false,
-                mustChangePassword: false,
-                lastActivity:       null,
-                showSecurityAlert:  false,
-              });
+              get()._clearAuthState();
             }
           }
         );
@@ -162,20 +176,24 @@ const useAuthStore = create(
         };
       },
 
-      // ─── loginWithCPF ────────────────────────────────────────────────────────
+      // ── Login ─────────────────────────────────────────────────────────────
       loginWithCPF: async (cpf, senha) => {
         set({ isLoading: true, authError: null });
 
         try {
-          const { data: emailData, error: emailError } = await supabase
-            .rpc('fn_email_por_cpf', { p_cpf: cpf.replace(/\D/g, '') });
+          const cpfLimpo = cpf.replace(/\D/g, '');
+          let emailParaLogin = `${cpfLimpo}@aguia.com.br`;
 
-          if (emailError || !emailData) {
-            throw new Error('CPF não encontrado no sistema.');
+          // Tenta buscar o e-mail real associado ao CPF
+          const { data: emailData, error: emailError } = await supabase
+            .rpc('fn_email_por_cpf', { p_cpf: cpfLimpo });
+
+          if (!emailError && emailData) {
+            emailParaLogin = emailData;
           }
 
           const { data, error: loginError } = await supabase.auth.signInWithPassword({
-            email:    emailData,
+            email: emailParaLogin,
             password: senha,
           });
 
@@ -183,13 +201,12 @@ const useAuthStore = create(
             throw new Error('CPF ou senha incorretos.');
           }
 
-          // Salva sessão e registra atividade imediatamente após login
           set({ session: data.session, lastActivity: Date.now() });
 
           await get()._loadProfile(data.user.id);
 
           if (!get().profile) {
-            await supabase.auth.signOut();
+            get().logout();
             throw new Error('Perfil não encontrado. Contate o administrador.');
           }
 
@@ -198,22 +215,21 @@ const useAuthStore = create(
         } catch (err) {
           set({ authError: err.message });
           return { success: false };
-
         } finally {
           set({ isLoading: false });
         }
       },
 
-      // ─── changePassword ──────────────────────────────────────────────────────
+      // ── Troca de senha ────────────────────────────────────────────────────
       changePassword: async (novaSenha) => {
         set({ isLoading: true, authError: null });
 
         try {
-          const { data: updatedAuth, error: authError } = await supabase.auth.updateUser({ password: novaSenha });
+          const { data: updatedAuth, error: authError } = await supabase.auth.updateUser({
+            password: novaSenha,
+          });
           if (authError) throw authError;
 
-          // Prioriza o id retornado pelo updateUser — garantido mesmo com
-          // isLoading=true bloqueando o onAuthStateChange (primeiro acesso)
           const userId = updatedAuth?.user?.id ?? get().session?.user?.id;
           if (!userId) throw new Error('Sessão não encontrada. Faça login novamente.');
 
@@ -223,7 +239,6 @@ const useAuthStore = create(
             .eq('id', userId);
           if (dbError) throw dbError;
 
-          // Atualiza perfil e registra atividade após troca de senha
           set((state) => ({
             profile:            { ...state.profile, senha_alterada: true },
             mustChangePassword: false,
@@ -241,43 +256,28 @@ const useAuthStore = create(
         }
       },
 
-      // ─── logout ──────────────────────────────────────────────────────────────
-      // Limpa estado em memória E remove o cache persistido do CapacitorStorage.
-      // Essencial para multi-usuário: o próximo usuário começa do zero.
-      logout: async () => {
-        try {
-          await supabase.auth.signOut();
-        } catch (err) {
-          // Ignora falhas de rede — o que importa é limpar o estado local
-          console.warn('[Auth] Erro no signOut Supabase:', err.message);
-        }
-
-        // Reset completo do estado em memória
-        set({
-          session:            null,
-          profile:            null,
-          authError:          null,
-          isAuthenticated:    false,
-          isSuperAdmin:       false,
-          isMecanico:         false,
-          mustChangePassword: false,
-          lastActivity:       null,
-          showSecurityAlert:  false,
-          _authInitialized:   false,
+      /**
+       * Logout explícito (acionado pelo usuário ou por inatividade).
+       * Fire-and-forget no Supabase para não travar a UI.
+       */
+      logout: () => {
+        // Dispara sem await — não trava o app se o Supabase estiver lento
+        supabase.auth.signOut().catch((err) => {
+          console.warn('[Auth] Aviso no signOut Supabase:', err.message);
         });
 
-        // MIGRAÇÃO: substituído localStorage.removeItem por CapacitorStorage.removeItem.
-        // Garante que o cache de perfil/roles seja removido do armazenamento nativo,
-        // impedindo que o próximo usuário herde dados do anterior.
-        try {
-          await CapacitorStorage.removeItem(STORAGE_KEY);
-        } catch (err) {
-          console.warn('[Auth] Erro ao limpar cache persistido:', err.message);
-        }
+        get()._clearAuthState();
+
+        // Remove cache nativo silenciosamente
+        CapacitorStorage.removeItem(STORAGE_KEY).catch(() => {});
       },
 
-      // ─── _loadProfile (interno) ──────────────────────────────────────────────
-      // NÃO toca em: isReady, isLoading
+      // ── Helpers internos ──────────────────────────────────────────────────
+
+      /**
+       * Carrega o perfil do usuário do banco e atualiza as flags derivadas.
+       * Em caso de erro, faz logout defensivo.
+       */
       _loadProfile: async (userId) => {
         try {
           const { data, error } = await supabase
@@ -286,19 +286,7 @@ const useAuthStore = create(
             .eq('id', userId)
             .single();
 
-          if (error) {
-            console.error('[Auth] Falha ao carregar perfil:', error.message);
-            set({
-              session:            null,
-              profile:            null,
-              isAuthenticated:    false,
-              isSuperAdmin:       false,
-              isMecanico:         false,
-              mustChangePassword: false,
-              lastActivity:       null,
-            });
-            return;
-          }
+          if (error) throw error;
 
           set({
             profile:            data,
@@ -309,33 +297,49 @@ const useAuthStore = create(
           });
 
         } catch (err) {
-          console.error('[Auth] Erro inesperado em _loadProfile:', err.message);
-          set({
-            isAuthenticated:    false,
-            isSuperAdmin:       false,
-            isMecanico:         false,
-            mustChangePassword: false,
-            lastActivity:       null,
-          });
+          console.error('[Auth] Erro em _loadProfile:', err.message);
+          get()._forceLogoutAndReady();
         }
       },
 
-      // ─── Utilitários ─────────────────────────────────────────────────────────
+      /**
+       * Limpa o estado de autenticação sem fazer signOut no Supabase.
+       * Usado internamente pelo listener onAuthStateChange.
+       */
+      _clearAuthState: () => {
+        set({
+          session:            null,
+          profile:            null,
+          isAuthenticated:    false,
+          isSuperAdmin:       false,
+          isMecanico:         false,
+          mustChangePassword: false,
+          lastActivity:       null,
+          showSecurityAlert:  false,
+        });
+      },
+
+      /**
+       * Logout forçado + marca isReady.
+       * Usado pelo safetyTimeout e por erros críticos no initAuth,
+       * garantindo que o app nunca fique preso na tela de loading.
+       */
+      _forceLogoutAndReady: () => {
+        get()._clearAuthState();
+        set({ isReady: true, _authInitialized: false });
+        CapacitorStorage.removeItem(STORAGE_KEY).catch(() => {});
+      },
+
       clearAuthError: () => set({ authError: null }),
 
     }),
 
-    // ─── Configuração do middleware persist ─────────────────────────────────────
+    // ── Configuração de persistência ──────────────────────────────────────
     {
       name: STORAGE_KEY,
-      // MIGRAÇÃO: substituído createJSONStorage(() => localStorage) por
-      // createJSONStorage(() => CapacitorStorage).
-      // CapacitorStorage é assíncrono e compatível com a interface esperada
-      // pelo Zustand persist (getItem / setItem / removeItem retornam Promises).
       storage: createJSONStorage(() => CapacitorStorage),
 
-      // Apenas estes campos são gravados no CapacitorStorage.
-      // NUNCA persistir: isReady, isLoading, authError, session, _authInitialized
+      // Apenas estes campos são gravados no storage nativo
       partialize: (state) => ({
         profile:            state.profile,
         isAuthenticated:    state.isAuthenticated,
@@ -345,16 +349,37 @@ const useAuthStore = create(
         lastActivity:       state.lastActivity,
       }),
 
-      // Hook pós-reidratação: garante que campos voláteis nunca venham do cache.
-      // Chamado assim que o persist termina de ler o CapacitorStorage.
-      onRehydrateStorage: () => (state) => {
+      /**
+       * Chamado pelo Zustand após a leitura (assíncrona) do storage.
+       *
+       * IMPORTANTE: No Android, esta callback é invocada de forma assíncrona
+       * após o Capacitor Preferences responder. Por isso, usamos a flag
+       * `_rehydrated` para sincronizar com o initAuth via waitForRehydration().
+       *
+       * Resetamos campos voláteis (session, isReady etc.) para que o initAuth
+       * sempre valide a sessão no Supabase — nunca confia apenas no cache.
+       */
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          console.error('[Auth] Erro na rehidratação do storage:', error);
+        }
+
         if (state) {
+          // Campos voláteis: sempre recalculados pelo initAuth
+          state.session           = null;
           state.isReady           = false;
           state.isLoading         = false;
           state.authError         = null;
-          state.session           = null;
           state.showSecurityAlert = false;
           state._authInitialized  = false;
+
+          // Sinaliza que a leitura assíncrona do storage concluiu
+          // (mesmo que state seja parcial, o Zustand já aplicou o que havia)
+          state._rehydrated = true;
+        } else {
+          // Storage vazio ou corrompido — sinaliza rehidratação como concluída
+          // para não bloquear o waitForRehydration indefinidamente
+          useAuthStore.setState({ _rehydrated: true });
         }
       },
     }
