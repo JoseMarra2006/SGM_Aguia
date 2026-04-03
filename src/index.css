@@ -1,6 +1,18 @@
-/* index.css — SGM Águia
+/* src/index.css — SGM Águia
    Resetado para ambiente mobile/web: sem dark-mode padrão do Vite,
-   sem centralização vertical do body que quebra páginas full-height. */
+   sem centralização vertical do body que quebra páginas full-height.
+
+   ── Correções de responsividade (v2) ──────────────────────────────────────
+   • 100vh → 100dvh  (Dynamic Viewport Height): resolve corte de botões em
+     mobile causado pela barra de endereço retrátil do browser / Capacitor.
+   • body e #root com min-height: 100dvh + display:flex + flex-direction:column
+     para que o conteúdo ocupe toda a tela sem overflow horizontal.
+   • Safe Area Insets via env(): respeita a status bar (notch/punch-hole) no
+     topo e a barra de gestos no rodapé, tanto em Android quanto iOS.
+   • Viewport meta no HTML deve ter `viewport-fit=cover` para que env() funcione:
+       <meta name="viewport" content="width=device-width, initial-scale=1,
+             viewport-fit=cover">
+*/
 
 :root {
   font-family: 'DM Sans', system-ui, Avenir, Helvetica, Arial, sans-serif;
@@ -12,6 +24,14 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* ── Safe Area Insets expostos como variáveis CSS ──────────────────────
+     Componentes filhos podem consumir --safe-top / --safe-bottom em vez de
+     reescrever o env() completo, o que é mais fácil de manter. */
+  --safe-top:    env(safe-area-inset-top,    0px);
+  --safe-right:  env(safe-area-inset-right,  0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left,   0px);
 }
 
 *,
@@ -30,15 +50,50 @@ a:hover {
   color: #1a5233;
 }
 
+/* ── Body: coluna flex que preenche toda a viewport dinâmica ─────────────
+   display:flex + flex-direction:column + min-height:100dvh permitem que
+   o filho #root (ou qualquer <main>) use flex:1 para ocupar o espaço restante
+   sem criar scroll na janela raiz. */
 body {
   margin: 0;
   padding: 0;
-  /* RESPONSIVIDADE: display:block em vez de flex+place-items:center
-     evita que páginas full-height sejam cortadas em mobile */
-  display: block;
+  display: flex;
+  flex-direction: column;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100dvh;          /* dvh em vez de vh — resolve corte em mobile */
   background-color: #F4F7FA;
+
+  /* ── Safe Areas no body ────────────────────────────────────────────────
+     padding-top  : afasta o conteúdo da status bar (bateria/hora/notch).
+     padding-bottom: afasta o conteúdo da barra de gestos do Android/iOS.
+     max() garante um mínimo confortável mesmo em dispositivos sem insets. */
+  padding-top:    max(var(--safe-top),    0px);
+  padding-bottom: max(var(--safe-bottom), 0px);
+  padding-left:   var(--safe-left);
+  padding-right:  var(--safe-right);
+}
+
+/* ── #root: herda a coluna flex e preenche todo o espaço disponível ──────
+   flex:1 + min-height:0 evitam o bug clássico onde o filho com overflow:auto
+   não respeita a altura do pai em colunas flex. */
+#root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;               /* necessário para overflow interno funcionar */
+  width: 100%;
+}
+
+/* ── Utilitário: .app-content ─────────────────────────────────────────────
+   Classe opcional para o container de conteúdo principal de cada página.
+   Use nos wrappers de página que precisam rolar internamente (não o body):
+     <div className="app-content"> ... </div>
+   Resultado: header/footer ficam fixos; só o meio da tela rola. */
+.app-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;  /* momentum scroll no iOS */
 }
 
 h1 {
@@ -54,7 +109,6 @@ button {
   font-size: 1em;
   font-weight: 500;
   font-family: inherit;
-  /* RESPONSIVIDADE: transparent em vez de #1a1a1a (conflitava com botões brancos do app) */
   background-color: transparent;
   cursor: pointer;
   transition: border-color 0.25s;

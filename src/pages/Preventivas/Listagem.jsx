@@ -1,14 +1,14 @@
 // src/pages/Preventivas/Listagem.jsx
-// ADIÇÕES v3 (admin CRUD):
-//   • ModalEditarAgendamento — altera data, mecânico e itens do checklist
-//     Disponível para agendamentos com status 'pendente'
-//   • Cancelamento de agendamento — disponível para 'pendente' e 'em_andamento'
-//   • ModalConfirmarCancelamento — confirmação antes de cancelar
-//   • Botões de edição/cancelamento em CardAgendamento — APENAS para superadmin
-// ADIÇÕES v4 (QR / Atalhos operacionais):
-//   • ModalAgendarPreventiva aceita defaultEquipamentoId (pré-seleciona equipamento)
-//   • Lê ?agendar=true&equipamento_id=[ID] para abertura automática via QR Code
+// ADIÇÕES v3 (admin CRUD): ModalEditarAgendamento, cancelamento, ModalConfirmarCancelamento
+// ADIÇÕES v4 (QR / Atalhos): defaultEquipamentoId, ?agendar=true&equipamento_id=[ID]
 // INALTERADO: lógica de agendamento, checklist, filtros, abas.
+// CORREÇÃO VISUAL (ícones invisíveis):
+//   • Todos os SVGs têm display:'block' + flexShrink:0 explícito.
+//   • EditIcon e BanIcon dentro de btnAcaoAdmin usam stroke explícito
+//     compatível com a cor do botão (não dependem de herança CSS).
+//   • CloseIcon, CloseSmIcon, CheckSmIcon: stroke explícito + display:'block'.
+//   • BanIcon do modal de cancelamento: stroke vermelho explícito (#EF4444).
+//   • Botões de apenas-ícone têm lineHeight:0 + padding:0.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -224,11 +224,7 @@ function ModalEditarAgendamento({ agendamento, onClose, onSucesso }) {
     try {
       const { error } = await supabase
         .from('agendamentos_preventivos')
-        .update({
-          mecanico_id:     mecanicoId,
-          data_agendada:   dataAgendada,
-          itens_checklist: itens,
-        })
+        .update({ mecanico_id: mecanicoId, data_agendada: dataAgendada, itens_checklist: itens })
         .eq('id', agendamento.id);
       if (error) throw error;
       onSucesso();
@@ -249,19 +245,16 @@ function ModalEditarAgendamento({ agendamento, onClose, onSucesso }) {
         <style>{CSS_MODAL}</style>
         <div style={M.header}>
           <div style={M.headerLeft}>
-            <EditIcon />
+            <EditIcon size={16} />
             <h3 style={M.titulo}>Editar Agendamento</h3>
           </div>
           <button onClick={onClose} style={M.btnFechar} disabled={salvando}><CloseIcon /></button>
         </div>
-
         <div style={M.corpo}>
-          {/* Equipamento (não editável) */}
           <div style={M.campo}>
             <label style={M.label}>Equipamento</label>
             <div style={M.campoFixo}>{agendamento.equipamentos?.nome ?? '—'}</div>
           </div>
-
           {loadingDados ? (
             <div style={M.loading}><div style={M.spinner} /></div>
           ) : (
@@ -273,13 +266,11 @@ function ModalEditarAgendamento({ agendamento, onClose, onSucesso }) {
                   {mecanicos.map(m => <option key={m.id} value={m.id}>{m.nome_completo}</option>)}
                 </select>
               </Campo>
-
               <Campo label="Nova data *" erro={erros.data}>
                 <input type="date" value={dataAgendada}
                   onChange={e => setDataAgendada(e.target.value)}
                   style={{ ...M.input, ...(erros.data ? M.inputErr : {}) }} disabled={salvando} />
               </Campo>
-
               <ItensChecklistEditor
                 itens={itens} setItens={setItens}
                 novoItem={novoItem} setNovoItem={setNovoItem}
@@ -288,12 +279,10 @@ function ModalEditarAgendamento({ agendamento, onClose, onSucesso }) {
                 inputItemRef={inputItemRef}
                 salvando={salvando}
               />
-
               {erroGlobal && <div style={M.erroGlobal}><AlertIcon />{erroGlobal}</div>}
             </>
           )}
         </div>
-
         {!loadingDados && (
           <div style={M.footer}>
             <button onClick={onClose} style={M.btnSecundario} disabled={salvando}>Cancelar</button>
@@ -314,7 +303,7 @@ function ModalConfirmarCancelamento({ agendamento, cancelando, onClose, onConfir
   return (
     <div style={MC.overlay} onClick={() => !cancelando && onClose()}>
       <div style={MC.box} onClick={e => e.stopPropagation()}>
-        <div style={MC.icone}><BanIcon /></div>
+        <div style={MC.icone}><BanIcon size={28} /></div>
         <h3 style={MC.titulo}>Cancelar agendamento?</h3>
         <p style={MC.subtitulo}>
           A preventiva de <strong>{agendamento.equipamentos?.nome ?? '—'}</strong>
@@ -420,8 +409,6 @@ function CardAgendamento({ agendamento, onClick, index, isSuperAdmin, onEditar, 
   };
 
   const acaoLabel = labelAcao();
-
-  // Permissões admin
   const podeEditar   = isSuperAdmin && isPendente;
   const podeCancelar = isSuperAdmin && (isPendente || isEmAndamento);
 
@@ -440,20 +427,19 @@ function CardAgendamento({ agendamento, onClick, index, isSuperAdmin, onEditar, 
           <span style={{ ...S.statusPill, color:statusInfo.cor, backgroundColor:statusInfo.bg, border:`1px solid ${statusInfo.borda}` }}>
             {statusInfo.label}
           </span>
-          {/* ── Botões admin — somente superadmin ── */}
           {isSuperAdmin && (podeEditar || podeCancelar) && (
             <div style={S.acoesAdmin} onClick={e => e.stopPropagation()}>
               {podeEditar && (
                 <button onClick={() => onEditar(agendamento)} style={S.btnAcaoAdmin}
                   title="Editar agendamento" aria-label="Editar">
-                  <EditIcon size={12} />
+                  <EditIcon size={13} />
                 </button>
               )}
               {podeCancelar && (
                 <button onClick={() => onCancelar(agendamento)}
                   style={{ ...S.btnAcaoAdmin, ...S.btnAcaoAdminCancel }}
                   title="Cancelar agendamento" aria-label="Cancelar">
-                  <BanIcon size={12} />
+                  <BanIcon size={13} cor="#EF4444" />
                 </button>
               )}
             </div>
@@ -505,14 +491,11 @@ export default function ListagemPreventivas() {
   const [erro,          setErro]          = useState(null);
   const [modalAberto,   setModalAberto]   = useState(false);
 
-  // ── Admin CRUD ──────────────────────────────────────────────
-  const [modalEditar,    setModalEditar]    = useState(null);
-  const [modalCancelar,  setModalCancelar]  = useState(null);
-  const [cancelando,     setCancelando]     = useState(false);
+  const [modalEditar,      setModalEditar]      = useState(null);
+  const [modalCancelar,    setModalCancelar]    = useState(null);
+  const [cancelando,       setCancelando]       = useState(false);
   const [erroCancelamento, setErroCancelamento] = useState('');
 
-  // ── Abertura automática via QR Code / atalho de Detalhes ────
-  // ?agendar=true&equipamento_id=[ID]
   useEffect(() => {
     if (searchParams.get('agendar') === 'true' && isSuperAdmin) {
       setModalAberto(true);
@@ -553,7 +536,6 @@ export default function ListagemPreventivas() {
 
   useEffect(() => { fetchAgendamentos(); }, [fetchAgendamentos]);
 
-  // ─── Handler: Cancelar ────────────────────────────────────────
   const handleCancelar = async () => {
     if (!modalCancelar) return;
     setCancelando(true);
@@ -583,7 +565,6 @@ export default function ListagemPreventivas() {
     <div style={S.page}>
       <style>{CSS}</style>
 
-      {/* Modais */}
       {modalAberto && (
         <ModalAgendarPreventiva
           onClose={() => setModalAberto(false)}
@@ -607,7 +588,6 @@ export default function ListagemPreventivas() {
         />
       )}
 
-      {/* Header */}
       <header style={S.header}>
         <div style={S.headerTop}>
           <div>
@@ -664,7 +644,6 @@ export default function ListagemPreventivas() {
         </div>
       </header>
 
-      {/* Conteúdo */}
       <main style={S.main}>
         {loading ? (
           <SkeletonList />
@@ -727,20 +706,149 @@ function EstadoVazio({ icone, texto, acao }) {
 }
 
 // ─── Ícones ───────────────────────────────────────────────────
-function GearIcon({ cor='#64748B' }) { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke={cor} strokeWidth="1.8"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke={cor} strokeWidth="1.8"/></svg>; }
-function CalendarIcon()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><rect x="3" y="4" width="18" height="18" rx="2" stroke="#94A3B8" strokeWidth="2"/><path d="M16 2v4M8 2v4M3 10h18" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function BellIcon({ cor='#92400E', size=13 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" stroke={cor} strokeWidth="2" strokeLinecap="round"/></svg>; }
-function UserIcon()      { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="4" stroke="#94A3B8" strokeWidth="2"/></svg>; }
-function ChevronIcon()   { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function CloseIcon()     { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function CloseSmIcon()   { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function AlertIcon()     { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><circle cx="12" cy="12" r="10" stroke="#EF4444" strokeWidth="2"/><path d="M12 8v4m0 4h.01" stroke="#EF4444" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function Spinner()       { return <span style={{ display:'inline-block', width:14, height:14, border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'#fff', borderRadius:'50%', animation:'spin .7s linear infinite', marginRight:7 }} />; }
-function CalendarPlusIcon({ size=16 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ marginRight:6, flexShrink:0 }}><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function ChecklistIcon() { return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function CheckSmIcon()   { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M20 6L9 17l-5-5" stroke="#20643F" strokeWidth="2.5" strokeLinecap="round"/></svg>; }
-function EditIcon({ size=14 })  { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function BanIcon({ size=14 })   { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"/><path d="M4.93 4.93l14.14 14.14" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
+// CORREÇÃO: display:'block' + flexShrink:0 em todos os SVGs.
+// Strokes explícitos (sem currentColor) nos ícones de botões críticos.
+
+function GearIcon({ cor='#64748B' }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke={cor} strokeWidth="1.8" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
+        stroke={cor} strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <rect x="3" y="4" width="18" height="18" rx="2" stroke="#94A3B8" strokeWidth="2" />
+      <path d="M16 2v4M8 2v4M3 10h18" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function BellIcon({ cor='#92400E', size=13 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"
+        stroke={cor} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function UserIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="7" r="4" stroke="#94A3B8" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// CORREÇÃO: stroke escuro explícito — aparece sobre fundo claro dos modais
+function CloseIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <path d="M18 6 6 18M6 6l12 12" stroke="#64748B" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// CORREÇÃO: stroke vermelho explícito no botão de remover item
+function CloseSmIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <path d="M18 6 6 18M6 6l12 12" stroke="#EF4444" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function AlertIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <circle cx="12" cy="12" r="10" stroke="#EF4444" strokeWidth="2" />
+      <path d="M12 8v4m0 4h.01" stroke="#EF4444" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function Spinner() {
+  return (
+    <span style={{ display:'inline-block', width:14, height:14, border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'#fff', borderRadius:'50%', animation:'spin .7s linear infinite', marginRight:7, flexShrink:0 }} />
+  );
+}
+
+function CalendarPlusIcon({ size=16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0, marginRight:6 }}>
+      <rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ChecklistIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// CORREÇÃO: stroke verde explícito — não depende de herança CSS
+function CheckSmIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <path d="M20 6L9 17l-5-5" stroke="#20643F" strokeWidth="2.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// CORREÇÃO: EditIcon — stroke cinza padrão no tamanho normal,
+// passa `cor` para usar dentro dos botões de CRUD onde a cor varia
+function EditIcon({ size=14, cor='#64748B' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"
+        stroke={cor} strokeWidth="2" strokeLinecap="round" />
+      <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"
+        stroke={cor} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// CORREÇÃO: BanIcon — aceita prop `cor` para contexto (modal usa vermelho, badge usa currentColor)
+function BanIcon({ size=14, cor='currentColor' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      style={{ display:'block', flexShrink:0 }}>
+      <circle cx="12" cy="12" r="10" stroke={cor} strokeWidth="2" />
+      <path d="M4.93 4.93l14.14 14.14" stroke={cor} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 // ─── CSS Global ───────────────────────────────────────────────
 const CSS = `
@@ -765,7 +873,8 @@ const M = {
   header:     { display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 20px 14px', borderBottom:'1px solid #F1F5F9', flexShrink:0 },
   headerLeft: { display:'flex', alignItems:'center', gap:'8px' },
   titulo:     { margin:0, fontSize:'17px', fontWeight:'800', color:'#0D1B2A', letterSpacing:'-0.2px' },
-  btnFechar:  { display:'flex', alignItems:'center', justifyContent:'center', width:'32px', height:'32px', border:'1px solid #E2E8F0', borderRadius:'8px', background:'#F8FAFC', cursor:'pointer', color:'#64748B' },
+  // CORREÇÃO: lineHeight:0 + padding:0 eliminam espaço fantasma
+  btnFechar:  { display:'flex', alignItems:'center', justifyContent:'center', width:'32px', height:'32px', padding:0, border:'1px solid #E2E8F0', borderRadius:'8px', background:'#F8FAFC', cursor:'pointer', lineHeight:0, flexShrink:0 },
   corpo:      { padding:'16px 20px', display:'flex', flexDirection:'column', gap:'14px', overflowY:'auto', flex:1 },
   campo:      { display:'flex', flexDirection:'column', gap:'6px' },
   label:      { fontSize:'11px', fontWeight:'700', color:'#374151', textTransform:'uppercase', letterSpacing:'0.4px', display:'flex', alignItems:'center', gap:'6px' },
@@ -780,17 +889,18 @@ const M = {
   itensList:  { margin:'0 0 8px 0', padding:0, listStyle:'none', display:'flex', flexDirection:'column', gap:'5px' },
   itemRow:    { display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', backgroundColor:'rgba(32,100,63,0.04)', borderRadius:'8px', border:'1px solid rgba(32,100,63,0.15)' },
   itemTexto:  { flex:1, fontSize:'13px', color:'#0D1B2A', fontWeight:'500' },
-  btnRemoverItem: { display:'flex', alignItems:'center', justifyContent:'center', width:'22px', height:'22px', border:'none', background:'rgba(239,68,68,0.08)', borderRadius:'5px', cursor:'pointer', color:'#EF4444', flexShrink:0 },
+  // CORREÇÃO: lineHeight:0 + padding:0 no botão de remover item
+  btnRemoverItem: { display:'flex', alignItems:'center', justifyContent:'center', width:'22px', height:'22px', padding:0, border:'none', background:'rgba(239,68,68,0.08)', borderRadius:'5px', cursor:'pointer', lineHeight:0, flexShrink:0 },
   addItemRow: { display:'flex', gap:'6px' },
   inputItem:  { flex:1, padding:'10px 12px', fontSize:'13px', border:'1.5px solid #E2E8F0', borderRadius:'8px', backgroundColor:'#FAFBFC', color:'#0D1B2A', fontFamily:'inherit' },
-  btnAddItem: { width:'40px', height:'40px', backgroundColor:'#20643F', color:'#FFFFFF', border:'none', borderRadius:'8px', fontSize:'20px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
+  btnAddItem: { width:'40px', height:'40px', backgroundColor:'#20643F', color:'#FFFFFF', border:'none', borderRadius:'8px', fontSize:'20px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, lineHeight:0 },
   sugestoesLabel: { fontSize:'11px', color:'#94A3B8', fontWeight:'600', textTransform:'uppercase', letterSpacing:'0.3px', marginTop:'4px' },
   sugestoesRow:   { display:'flex', flexWrap:'wrap', gap:'6px' },
   chipSugestao:   { padding:'5px 10px', border:'1.5px solid #E2E8F0', borderRadius:'20px', backgroundColor:'#FFFFFF', fontSize:'11px', fontWeight:'600', color:'#64748B', cursor:'pointer', fontFamily:'inherit', flexShrink:0 },
   erroGlobal: { display:'flex', alignItems:'center', gap:'8px', padding:'11px 13px', backgroundColor:'#FEF2F2', border:'1px solid #FECACA', borderRadius:'8px', fontSize:'13px', color:'#DC2626' },
   footer:     { padding:'14px 20px', borderTop:'1px solid #F1F5F9', display:'flex', gap:'8px', flexShrink:0 },
   btnSecundario: { flex:1, padding:'12px', backgroundColor:'#F1F5F9', color:'#64748B', border:'none', borderRadius:'9px', fontSize:'14px', fontWeight:'600', cursor:'pointer', fontFamily:'inherit' },
-  btnPrimario:   { flex:2, display:'flex', alignItems:'center', justifyContent:'center', padding:'12px', backgroundColor:'#20643F', color:'#FFFFFF', border:'none', borderRadius:'9px', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:'inherit' },
+  btnPrimario:   { flex:2, display:'flex', alignItems:'center', justifyContent:'center', gap:'6px', padding:'12px', backgroundColor:'#20643F', color:'#FFFFFF', border:'none', borderRadius:'9px', fontSize:'14px', fontWeight:'700', cursor:'pointer', fontFamily:'inherit' },
   loading:    { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'12px', padding:'40px' },
   spinner:    { width:'24px', height:'24px', border:'3px solid #E8EDF2', borderTopColor:'#20643F', borderRadius:'50%', animation:'spin 0.7s linear infinite' },
 };
@@ -804,7 +914,7 @@ const MC = {
   subtitulo: { margin:0, fontSize:'13px', color:'#64748B', textAlign:'center', lineHeight:1.6 },
   botoes:  { display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', width:'100%', marginTop:'4px' },
   btnVoltar:  { padding:'12px', backgroundColor:'#F8FAFC', color:'#64748B', border:'1.5px solid #E2E8F0', borderRadius:'9px', fontSize:'13px', fontWeight:'600', cursor:'pointer', fontFamily:'inherit' },
-  btnCancelar:{ display:'flex', alignItems:'center', justifyContent:'center', padding:'12px', backgroundColor:'#EF4444', color:'#FFFFFF', border:'none', borderRadius:'9px', fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:'inherit' },
+  btnCancelar:{ display:'flex', alignItems:'center', justifyContent:'center', gap:'6px', padding:'12px', backgroundColor:'#EF4444', color:'#FFFFFF', border:'none', borderRadius:'9px', fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:'inherit' },
 };
 
 // ─── Estilos Listagem ─────────────────────────────────────────
@@ -816,7 +926,7 @@ const S = {
   eyebrow:      { margin:'0 0 2px', fontSize:'11px', fontWeight:'600', letterSpacing:'1.2px', textTransform:'uppercase', color:'#20643F' },
   pageTitle:    { margin:0, fontSize:'26px', fontWeight:'800', color:'#0D1B2A', letterSpacing:'-0.5px' },
   alertaBadge:  { display:'flex', alignItems:'center', gap:'5px', padding:'6px 12px', backgroundColor:'rgba(245,158,11,0.12)', border:'1px solid rgba(245,158,11,0.3)', borderRadius:'20px', fontSize:'12px', fontWeight:'700', color:'#92400E' },
-  btnAgendar:   { display:'flex', alignItems:'center', padding:'9px 16px', backgroundColor:'#20643F', color:'#FFFFFF', border:'none', borderRadius:'10px', fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:'inherit', flexShrink:0 },
+  btnAgendar:   { display:'flex', alignItems:'center', gap:'6px', padding:'9px 16px', backgroundColor:'#20643F', color:'#FFFFFF', border:'none', borderRadius:'10px', fontSize:'13px', fontWeight:'700', cursor:'pointer', fontFamily:'inherit', flexShrink:0 },
   resumoRow:    { display:'flex', alignItems:'center', backgroundColor:'#F8FAFC', border:'1px solid #E8EDF2', borderRadius:'10px', padding:'10px 0', marginBottom:'14px', overflow:'hidden' },
   resumoChip:   { flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:'2px' },
   resumoNum:    { fontSize:'20px', fontWeight:'800', letterSpacing:'-0.5px' },
@@ -832,10 +942,10 @@ const S = {
   equipInfo:    { display:'flex', alignItems:'center', gap:'7px', overflow:'hidden', minWidth:0 },
   equipNome:    { fontSize:'15px', fontWeight:'700', color:'#0D1B2A', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', letterSpacing:'-0.1px' },
   statusPill:   { padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'700', flexShrink:0 },
-  // Botões admin no card
   acoesAdmin:   { display:'flex', gap:'4px', flexShrink:0 },
-  btnAcaoAdmin: { display:'flex', alignItems:'center', justifyContent:'center', width:'28px', height:'28px', backgroundColor:'rgba(13,27,42,0.07)', border:'1.5px solid #E2E8F0', borderRadius:'7px', cursor:'pointer', color:'#64748B' },
-  btnAcaoAdminCancel: { backgroundColor:'rgba(239,68,68,0.08)', borderColor:'rgba(239,68,68,0.3)', color:'#EF4444' },
+  // CORREÇÃO: lineHeight:0 + padding:0 nos botões de CRUD do card
+  btnAcaoAdmin: { display:'flex', alignItems:'center', justifyContent:'center', width:'28px', height:'28px', padding:0, backgroundColor:'rgba(13,27,42,0.07)', border:'1.5px solid #E2E8F0', borderRadius:'7px', cursor:'pointer', lineHeight:0 },
+  btnAcaoAdminCancel: { backgroundColor:'rgba(239,68,68,0.08)', borderColor:'rgba(239,68,68,0.3)' },
   cardMid:      { display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' },
   dataTexto:    { fontSize:'13px', color:'#475569' },
   alertaTag:    { display:'flex', alignItems:'center', gap:'4px', padding:'2px 8px', backgroundColor:'rgba(245,158,11,0.1)', color:'#92400E', border:'1px solid rgba(245,158,11,0.25)', borderRadius:'10px', fontSize:'11px', fontWeight:'600' },

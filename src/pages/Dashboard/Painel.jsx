@@ -7,6 +7,12 @@
 //     consistente com o modelo de fila.
 // INALTERADO: todo o restante do componente, incluindo notificações,
 //   métricas, SecurityAlertModal, bottom nav, bottom nav, paleta verde.
+// CORREÇÃO VISUAL (ícones invisíveis):
+//   • Todos os SVGs de botões de ação agora têm flexShrink:0, display:'block'
+//     e strokes/fills explícitos (não dependem de herança CSS instável).
+//   • Botões de ação (logout, sino, fechar) têm color explícita reforçada.
+//   • lineHeight:0 / fontSize:0 adicionado aos botões que contêm apenas SVG
+//     para eliminar espaço fantasma que esmagava o ícone.
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -143,7 +149,6 @@ function CardMetrica({ label, valor, icone, cor, bg, borda, onClick, loading, in
 // ─── Item de OS Ativa ─────────────────────────────────────────
 
 function ItemOSAtiva({ os, onClick }) {
-  // Exibe "Aberto por" no novo modelo ou fallback para o campo usuarios legado
   const abertoPorNome = os.aberto_usuario?.nome_completo ?? os.usuarios?.nome_completo ?? '—';
   return (
     <div onClick={onClick} style={S.osItem} role="button" tabIndex={0}>
@@ -260,10 +265,6 @@ export default function Painel() {
       try {
         const hoje = new Date().toISOString().split('T')[0];
 
-        // ── OS em andamento ──────────────────────────────────────
-        // CORREÇÃO CONFLITO #3: filtro `mecanico_id = profile.id` REMOVIDO.
-        // Com fila aberta, mecanico_id é null em todas as novas OS.
-        // Todos os usuários autenticados devem ver todas as OS em andamento.
         const qOS = supabase
           .from('ordens_servico')
           .select(`
@@ -276,9 +277,6 @@ export default function Painel() {
           .order('inicio_em', { ascending: true })
           .limit(5);
 
-        // ── Preventivas atrasadas ────────────────────────────────
-        // Mecânicos veem apenas suas próprias preventivas atrasadas
-        // (preventivas ainda têm designação de mecânico)
         let qPrev = supabase
           .from('agendamentos_preventivos')
           .select(`id, data_agendada, equipamentos(nome), tecnico:usuarios!mecanico_id(nome_completo)`)
@@ -498,26 +496,221 @@ function EmptyLista({ icone, texto }) {
 }
 
 // ─── Ícones ───────────────────────────────────────────────────
-function CloseIcon()    { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function ChevronIcon()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ color: '#CBD5E1', flexShrink: 0 }}><path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function UserSmIcon()   { return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="4" stroke="#94A3B8" strokeWidth="2"/></svg>; }
-function TimerSmIcon()  { return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="10" stroke="#94A3B8" strokeWidth="2"/><path d="M12 6v6l4 2" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function BellNavIcon()  { return <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
-function GearMetIcon()  { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="#20643F" strokeWidth="1.8"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#20643F" strokeWidth="1.8"/></svg>; }
-function WrenchMetIcon(){ return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" stroke="#F59E0B" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function OSMetIcon({ ativa }) { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke={ativa ? '#EF4444' : '#10B981'} strokeWidth="2"/><path d="M14 2v6h6M12 18v-6M9 15h6" stroke={ativa ? '#EF4444' : '#10B981'} strokeWidth="2" strokeLinecap="round"/></svg>; }
-function CalMetIcon({ atrasada }) { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" stroke={atrasada ? '#EF4444' : '#10B981'} strokeWidth="2"/><path d="M16 2v4M8 2v4M3 10h18" stroke={atrasada ? '#EF4444' : '#10B981'} strokeWidth="2" strokeLinecap="round"/></svg>; }
-function OSAcaoIcon()   { return <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="#20643F" strokeWidth="2"/><path d="M14 2v6h6M12 18v-6M9 15h6" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function GearAcaoIcon() { return <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="#20643F" strokeWidth="1.8"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#20643F" strokeWidth="1.8"/></svg>; }
-function UserAcaoIcon() { return <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="7" r="4" stroke="#20643F" strokeWidth="2"/></svg>; }
-function BoxAcaoIcon()  { return <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" stroke="#20643F" strokeWidth="2"/><path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function LogoutIcon()   { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
-function OfflineIcon()  { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.8M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function SyncIcon()     { return <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}><polyline points="1 4 1 10 7 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function HomeIcon()     { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><polyline points="9 22 9 12 15 12 15 22" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function GearNavIcon()  { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="1.8"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" strokeWidth="1.8"/></svg>; }
-function CalNavIcon()   { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2"/><path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function OSNavIcon()    { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" strokeWidth="2"/><path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
+// CORREÇÃO: flexShrink:0 + display:'block' em todos os SVGs de botões de ação.
+// stroke explícito (não currentColor) nos ícones dentro de botões coloridos
+// para garantir visibilidade no Capacitor WebView.
+
+function CloseIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M18 6 6 18M6 6l12 12" stroke="#64748B" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M9 18l6-6-6-6" stroke="#CBD5E1" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function UserSmIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="7" r="4" stroke="#94A3B8" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function TimerSmIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="10" stroke="#94A3B8" strokeWidth="2" />
+      <path d="M12 6v6l4 2" stroke="#94A3B8" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// CORREÇÃO: BellNavIcon e LogoutIcon usam stroke branco explícito
+// pois ficam sobre fundo verde (#20643F) — currentColor falha no WebView.
+function BellNavIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"
+        stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"
+        stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function GearMetIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="#20643F" strokeWidth="1.8" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
+        stroke="#20643F" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function WrenchMetIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"
+        stroke="#F59E0B" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function OSMetIcon({ ativa }) {
+  const cor = ativa ? '#EF4444' : '#10B981';
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke={cor} strokeWidth="2" />
+      <path d="M14 2v6h6M12 18v-6M9 15h6" stroke={cor} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CalMetIcon({ atrasada }) {
+  const cor = atrasada ? '#EF4444' : '#10B981';
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="3" y="4" width="18" height="18" rx="2" stroke={cor} strokeWidth="2" />
+      <path d="M16 2v4M8 2v4M3 10h18" stroke={cor} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function OSAcaoIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="#20643F" strokeWidth="2" />
+      <path d="M14 2v6h6M12 18v-6M9 15h6" stroke="#20643F" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function GearAcaoIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="#20643F" strokeWidth="1.8" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
+        stroke="#20643F" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function UserAcaoIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" stroke="#20643F" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="7" r="4" stroke="#20643F" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function BoxAcaoIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"
+        stroke="#20643F" strokeWidth="2" />
+      <path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12" stroke="#20643F" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function OfflineIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.8M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01"
+        stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SyncIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <polyline points="1 4 1 10 7 10" stroke="#FEF3C7" strokeWidth="2" strokeLinecap="round" />
+      <path d="M3.51 15a9 9 0 102.13-9.36L1 10" stroke="#FEF3C7" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// CORREÇÃO: ícones da bottom nav usam stroke explícito com fallback
+// pois `color` via CSS pode não herdar corretamente no Capacitor WebView.
+// A cor ativa/inativa é controlada pelo estilo do botão pai via CSS class.
+function HomeIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <polyline points="9 22 9 12 15 12 15 22"
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function GearNavIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
+        stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function CalNavIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="3" y="4" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="2" />
+      <path d="M16 2v4M8 2v4M3 10h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function OSNavIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"
+        stroke="currentColor" strokeWidth="2" />
+      <path d="M14 2v6h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 // ─── CSS Global ───────────────────────────────────────────────
 const CSS = `
@@ -536,7 +729,8 @@ const NS = {
   unreadBadge:   { padding: '2px 8px', borderRadius: '20px', backgroundColor: '#20643F', color: '#FFFFFF', fontSize: '11px', fontWeight: '700' },
   headerAcoes:   { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
   btnMarcarTodas:{ padding: '5px 10px', borderRadius: '7px', border: '1.5px solid #E2E8F0', backgroundColor: '#F8FAFC', color: '#64748B', fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
-  btnFechar:     { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', border: '1px solid #E2E8F0', borderRadius: '7px', background: '#F8FAFC', cursor: 'pointer', color: '#64748B' },
+  // CORREÇÃO: lineHeight:0 elimina espaço fantasma de texto; display+alignItems+justifyContent garantem centralização do SVG
+  btnFechar:     { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', border: '1px solid #E2E8F0', borderRadius: '7px', background: '#F8FAFC', cursor: 'pointer', color: '#64748B', lineHeight: 0, padding: 0 },
   lista:         { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' },
   vazio:         { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', padding: '40px' },
   vazioTexto:    { margin: 0, fontSize: '14px', color: '#94A3B8', fontWeight: '500' },
@@ -561,9 +755,10 @@ const S = {
   headerNome:         { fontSize: '16px', color: '#FFFFFF', fontWeight: '700', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   headerAcoes:        { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
   offlinePill:        { display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '20px', fontSize: '11px', color: '#FFFFFF', fontWeight: '600' },
-  btnSino:            { position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: 0, border: '1.5px solid rgba(255,255,255,0.5)', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)', cursor: 'pointer', color: '#FFFFFF' },
+  // CORREÇÃO: lineHeight:0 + padding:0 + display/align/justify garantem SVG centralizado sem espaço fantasma
+  btnSino:            { position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: 0, border: '1.5px solid rgba(255,255,255,0.5)', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)', cursor: 'pointer', lineHeight: 0 },
   sinoBadge:          { position: 'absolute', top: '-5px', right: '-5px', minWidth: '17px', height: '17px', padding: '0 4px', borderRadius: '10px', backgroundColor: '#EF4444', color: '#FFFFFF', fontSize: '10px', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #20643F' },
-  btnLogout:          { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: 0, border: '1.5px solid rgba(255,255,255,0.5)', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)', cursor: 'pointer', color: '#FFFFFF' },
+  btnLogout:          { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: 0, border: '1.5px solid rgba(255,255,255,0.5)', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)', cursor: 'pointer', lineHeight: 0 },
   syncBanner:         { display: 'flex', alignItems: 'center', gap: '7px', padding: '8px 16px', backgroundColor: 'rgba(245,158,11,0.2)', borderTop: '1px solid rgba(245,158,11,0.3)', fontSize: '12px', color: '#FEF3C7', fontWeight: '500' },
   main:               { padding: '16px', display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '640px', margin: '0 auto', width: '100%', boxSizing: 'border-box' },
   sectionLabel:       { margin: '0 0 10px 0', fontSize: '11px', fontWeight: '700', color: '#94A3B8', letterSpacing: '1.2px', textTransform: 'uppercase' },
@@ -589,7 +784,7 @@ const S = {
   osMetaItem:         { display: 'flex', alignItems: 'center', gap: '3px', fontSize: '11px', color: '#94A3B8' },
   osMetaDot:          { width: '3px', height: '3px', borderRadius: '50%', backgroundColor: '#CBD5E1' },
   bottomNav:          { position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 30, display: 'flex', backgroundColor: '#FFFFFF', borderTop: '1px solid #E8EDF2', paddingBottom: 'env(safe-area-inset-bottom)' },
-  navItem:            { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', padding: '10px 4px', border: 'none', background: 'none', cursor: 'pointer', color: '#94A3B8', fontFamily: 'inherit', WebkitTapHighlightColor: 'transparent' },
+  navItem:            { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', padding: '10px 4px', border: 'none', background: 'none', cursor: 'pointer', color: '#94A3B8', fontFamily: 'inherit', WebkitTapHighlightColor: 'transparent', lineHeight: 0 },
   navItemAtivo:       { color: '#20643F' },
-  navLabel:           { fontSize: '10px', fontWeight: '600', letterSpacing: '0.2px' },
+  navLabel:           { fontSize: '10px', fontWeight: '600', letterSpacing: '0.2px', lineHeight: 1.2 },
 };

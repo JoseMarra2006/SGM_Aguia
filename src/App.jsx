@@ -28,11 +28,16 @@ import DetalhesOS          from './pages/Corretivas/Detalhes.jsx';
 
 // ─── Tela de carregamento ──────────────────────────────────────────────────
 // Exibida enquanto initAuth verifica se há sessão ativa (F5 / reload).
+//
+// RESPONSIVIDADE: usa 100dvh (Dynamic Viewport Height) em vez de 100vh para
+// que a tela de splash preencha exatamente a viewport visível em mobile,
+// sem ser cortada pela barra de endereço retrátil ou pela status bar.
 function SplashScreen() {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      height: '100dvh', backgroundColor: '#0F4C81',
+      height: '100dvh',                 // dvh: viewport dinâmica (mobile-safe)
+      backgroundColor: '#0F4C81',
       flexDirection: 'column', gap: '16px',
     }}>
       <svg width="56" height="56" viewBox="0 0 48 48" fill="none">
@@ -57,7 +62,9 @@ function Placeholder({ title }) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', height: '100dvh', gap: '12px',
+      justifyContent: 'center',
+      height: '100dvh',               // dvh: viewport dinâmica (mobile-safe)
+      gap: '12px',
       fontFamily: "'DM Sans', sans-serif", color: '#64748B', backgroundColor: '#F8F9FB',
     }}>
       <span style={{ fontSize: '40px' }}>🚧</span>
@@ -342,6 +349,25 @@ function AppInitializer() {
 }
 
 // ─── App principal ────────────────────────────────────────────────────────
+//
+// RESPONSIVIDADE — Safe Area Insets:
+//   O wrapper externo (#app-shell) aplica padding usando env() para respeitar:
+//     • Status bar (bateria/hora/notch) no topo  → padding-top
+//     • Barra de gestos do Android/iOS no rodapé → padding-bottom
+//     • Bordas laterais em iPhones com Dynamic Island → padding-left/right
+//
+//   max(env(...), Xpx) garante um mínimo legível mesmo em dispositivos sem
+//   safe area real (tablets com borda plana, emuladores, browser desktop).
+//
+//   height: 100dvh no shell garante que o app preencha exatamente a viewport
+//   dinâmica visível — sem overflow quando a barra de endereço do browser
+//   aparece/desaparece em mobile.
+//
+//   ATENÇÃO: Para que env(safe-area-inset-*) funcione no Capacitor/WebView,
+//   o index.html DEVE conter:
+//     <meta name="viewport" content="width=device-width, initial-scale=1,
+//           viewport-fit=cover">
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -351,53 +377,82 @@ export default function App() {
         Todos são componentes sem UI (retornam null).
 
         Ordem importa:
-          1. AppInitializer   → inicializa auth e serviços
+          1. AppInitializer    → inicializa auth e serviços
           2. BackButtonHandler → registra listener do back button nativo
-          3. AppStateHandler  → resiliência a background/foreground  ← NOVO
+          3. AppStateHandler   → resiliência a background/foreground
       */}
       <AppInitializer />
       <BackButtonHandler />
       <AppStateHandler />
 
-      <Routes>
-        {/* Raiz → dashboard */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      {/*
+        #app-shell — container raiz do layout visual.
 
-        {/* Rotas públicas (apenas visitantes não autenticados) */}
-        <Route element={<PublicOnlyRoute />}>
-          <Route path="/login" element={<Login />} />
-        </Route>
+        Estrutura:
+          display: flex + flex-direction: column → permite que filhos usem
+            flex: 1 para ocupar o espaço restante (scrollable content area).
+          height: 100dvh → viewport dinâmica; não corta em mobile.
+          overflow: hidden → o scroll acontece nos filhos, não aqui.
+          padding safe area → afasta conteúdo da status bar e barra de gestos.
+      */}
+      <div
+        id="app-shell"
+        style={{
+          display:       'flex',
+          flexDirection: 'column',
+          height:        '100dvh',
+          overflow:      'hidden',
+          // Safe area: topo (status bar / notch)
+          paddingTop:    'max(env(safe-area-inset-top, 0px), 0px)',
+          // Safe area: rodapé (barra de gestos Android/iOS)
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          // Safe area: laterais (Dynamic Island, punched-holes)
+          paddingLeft:   'env(safe-area-inset-left,  0px)',
+          paddingRight:  'env(safe-area-inset-right, 0px)',
+          // Herda background global definido em index.css
+          backgroundColor: 'var(--color-bg, #F4F7FA)',
+        }}
+      >
+        <Routes>
+          {/* Raiz → dashboard */}
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-        {/* Rotas privadas (exige autenticação) */}
-        <Route element={<PrivateRoute />}>
-          {/* Dashboard central */}
-          <Route path="/dashboard" element={<Painel />} />
-          <Route path="/perfil"    element={<Placeholder title="Meu Perfil" />} />
-
-          {/* Módulo 1 — Equipamentos */}
-          <Route path="/equipamentos"     element={<Listagem />} />
-          <Route path="/equipamentos/:id" element={<Detalhe />} />
-
-          {/* Módulo 2 — Preventivas */}
-          <Route path="/preventivas"                          element={<ListagemPreventivas />} />
-          <Route path="/preventivas/:agendamentoId/checklist" element={<Checklist />} />
-
-          {/* Módulo 3 — Corretivas */}
-          <Route path="/corretivas"      element={<ListagemCorretivas />} />
-          <Route path="/corretivas/nova" element={<NovaOS />} />
-          <Route path="/corretivas/:id"  element={<DetalhesOS />} />
-
-          {/* Apenas SuperAdmin */}
-          <Route element={<SuperAdminRoute />}>
-            <Route path="/equipamentos/novo"  element={<Cadastro />} />
-            <Route path="/dashboard/usuarios" element={<Usuarios />} />
-            <Route path="/dashboard/pecas"    element={<Pecas />} />
+          {/* Rotas públicas (apenas visitantes não autenticados) */}
+          <Route element={<PublicOnlyRoute />}>
+            <Route path="/login" element={<Login />} />
           </Route>
-        </Route>
 
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
+          {/* Rotas privadas (exige autenticação) */}
+          <Route element={<PrivateRoute />}>
+            {/* Dashboard central */}
+            <Route path="/dashboard" element={<Painel />} />
+            <Route path="/perfil"    element={<Placeholder title="Meu Perfil" />} />
+
+            {/* Módulo 1 — Equipamentos */}
+            <Route path="/equipamentos"     element={<Listagem />} />
+            <Route path="/equipamentos/:id" element={<Detalhe />} />
+
+            {/* Módulo 2 — Preventivas */}
+            <Route path="/preventivas"                          element={<ListagemPreventivas />} />
+            <Route path="/preventivas/:agendamentoId/checklist" element={<Checklist />} />
+
+            {/* Módulo 3 — Corretivas */}
+            <Route path="/corretivas"      element={<ListagemCorretivas />} />
+            <Route path="/corretivas/nova" element={<NovaOS />} />
+            <Route path="/corretivas/:id"  element={<DetalhesOS />} />
+
+            {/* Apenas SuperAdmin */}
+            <Route element={<SuperAdminRoute />}>
+              <Route path="/equipamentos/novo"  element={<Cadastro />} />
+              <Route path="/dashboard/usuarios" element={<Usuarios />} />
+              <Route path="/dashboard/pecas"    element={<Pecas />} />
+            </Route>
+          </Route>
+
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </div>
     </BrowserRouter>
   );
 }

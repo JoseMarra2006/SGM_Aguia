@@ -3,13 +3,15 @@
 //   • Visualizador de manual: modal com <iframe> e buildIframeSrc()
 // ADIÇÕES v3 (QR / Atalhos operacionais):
 //   • Botão QR Code na topbar → ModalQRCode com impressão de etiqueta
-//   • Seção "Ações rápidas" no final da página:
-//       – "Abrir O.S. Corretiva" → /corretivas/nova?equipamento_id=[ID]
-//       – Admin: "Agendar Preventiva" → /preventivas?agendar=true&equipamento_id=[ID]
-//       – Mecânico: "Iniciar Preventiva de Hoje" (condicional — só se houver
-//         agendamento pendente/em_andamento para hoje neste equipamento)
+//   • Seção "Ações rápidas" no final da página
 //   • Deep link nativo: QR Code encoda window.location.origin + /equipamentos/[ID]
 // INALTERADO: galeria, lightbox, peças, manual, autenticação, cores.
+// CORREÇÃO VISUAL (ícones invisíveis):
+//   • Todos os SVGs têm display:'block' + flexShrink:0 explícito.
+//   • Ícones sobre fundo colorido usam stroke explícito (não currentColor).
+//   • Botões de apenas-ícone têm lineHeight:0 + padding:0 para eliminar
+//     espaço fantasma que comprimia o SVG a tamanho zero.
+//   • CloseIcon do lightbox: stroke branco explícito (fundo escuro #000).
 
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -119,7 +121,7 @@ function ModalQRCode({ equipamento, onClose }) {
     <div style={QRS.overlay} onClick={onClose}>
       <div style={QRS.box} onClick={e => e.stopPropagation()}>
         <div style={QRS.header}>
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <QRCodeIcon />
             <span style={QRS.titulo}>QR Code — {equipamento.nome}</span>
           </div>
@@ -163,12 +165,9 @@ export default function Detalhes() {
   const [imagemAtiva,       setImagemAtiva]       = useState(0);
   const [lightboxAberto,    setLightboxAberto]    = useState(false);
   const [modalManualAberto, setModalManualAberto] = useState(false);
+  const [qrModalOpen,       setQrModalOpen]       = useState(false);
+  const [agendamentoHoje,   setAgendamentoHoje]   = useState(null);
 
-  // ── Novo: QR Code e atalho de preventiva ─────────────────────
-  const [qrModalOpen,    setQrModalOpen]    = useState(false);
-  const [agendamentoHoje, setAgendamentoHoje] = useState(null); // para mecânicos
-
-  // ─── Busca dados do equipamento ───────────────────────────────
   useEffect(() => {
     async function fetchDados() {
       setLoading(true); setErro(null);
@@ -193,8 +192,6 @@ export default function Detalhes() {
     fetchDados();
   }, [id]);
 
-  // ─── Verifica agendamento de hoje (apenas para mecânicos) ─────
-  // Exibe o botão "Iniciar Preventiva de Hoje" condicionalmente.
   useEffect(() => {
     if (!id || !profile?.id || isSuperAdmin) return;
     const hoje = new Date().toISOString().split('T')[0];
@@ -226,7 +223,6 @@ export default function Detalhes() {
           <BackIcon />
         </button>
         <span style={S.topbarTitle} title={equipamento.nome}>{equipamento.nome}</span>
-        {/* Botão QR Code — visível para todos */}
         <button onClick={() => setQrModalOpen(true)} style={S.qrBtn} title="Ver QR Code" aria-label="QR Code">
           <QRCodeIcon />
         </button>
@@ -326,7 +322,6 @@ export default function Detalhes() {
           </div>
           <div style={AR.btnGroup}>
 
-            {/* Abrir O.S. Corretiva — disponível para todos */}
             <button
               onClick={() => navigate(`/corretivas/nova?equipamento_id=${equipamento.id}`)}
               style={AR.btnOS}
@@ -339,7 +334,6 @@ export default function Detalhes() {
               <ChevronRightIcon cor="#20643F" />
             </button>
 
-            {/* Admin: Agendar Preventiva */}
             {isSuperAdmin && (
               <button
                 onClick={() => navigate(`/preventivas?agendar=true&equipamento_id=${equipamento.id}`)}
@@ -354,7 +348,6 @@ export default function Detalhes() {
               </button>
             )}
 
-            {/* Mecânico: Iniciar Preventiva de Hoje (condicional) */}
             {!isSuperAdmin && agendamentoHoje && (
               <button
                 onClick={() => navigate(`/preventivas/${agendamentoHoje.id}/checklist`)}
@@ -371,7 +364,6 @@ export default function Detalhes() {
               </button>
             )}
 
-            {/* Mecânico sem agendamento hoje: info sutil */}
             {!isSuperAdmin && !agendamentoHoje && (
               <div style={AR.semAgendamento}>
                 <span style={{ fontSize: '14px' }}>📋</span>
@@ -386,22 +378,19 @@ export default function Detalhes() {
 
       </main>
 
-      {/* ── Modal QR Code ── */}
       {qrModalOpen && (
         <ModalQRCode equipamento={equipamento} onClose={() => setQrModalOpen(false)} />
       )}
 
-      {/* ── Modal de visualização do manual ── */}
       {modalManualAberto && (
         <ModalManual manualUrl={equipamento.manual_url} onClose={() => setModalManualAberto(false)} />
       )}
 
-      {/* ── Lightbox de imagem ampliada ── */}
       {lightboxAberto && (
         <div style={S.lightboxOverlay} onClick={() => setLightboxAberto(false)}
           role="dialog" aria-modal="true" aria-label="Imagem ampliada">
           <button style={S.lightboxClose} onClick={() => setLightboxAberto(false)} aria-label="Fechar">
-            <CloseIcon />
+            <CloseIconWhite />
           </button>
           <img src={imagens[imagemAtiva]} alt={equipamento.nome} style={S.lightboxImg}
             onClick={(e) => e.stopPropagation()} />
@@ -443,23 +432,171 @@ function ErroDetalhes({ message, onBack }) {
 }
 
 // ─── Ícones ───────────────────────────────────────────────────
-function BackIcon()     { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
-function EditIcon()     { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function ZoomIcon()     { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="8" stroke="currentColor" strokeWidth="2"/><path d="m21 21-4.35-4.35M11 8v6M8 11h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function PdfIcon({ color = '#EF4444', size = 18 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke={color} strokeWidth="2" strokeLinecap="round"/><path d="M14 2v6h6M9 13h6M9 17h4" stroke={color} strokeWidth="2" strokeLinecap="round"/></svg>; }
-function WrenchIcon()   { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" stroke="#0F4C81" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function CloseIcon()    { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function ExternalIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14 21 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
-function GearIcon()     { return <svg width="48" height="48" viewBox="0 0 24 24" fill="none"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="#CBD5E1" strokeWidth="1.5"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="#CBD5E1" strokeWidth="1.5"/></svg>; }
+// CORREÇÃO: display:'block' + flexShrink:0 em todos os SVGs.
+// Ícones de botões sobre fundo colorido usam stroke explícito.
 
-// ── Novos ícones para QR / Ações ─────────────────────────────
-function QRCodeIcon()   { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style={{ display:'block', flexShrink:0 }}><rect x="3" y="3" width="7" height="7" rx="1.5" stroke="#0D1B2A" strokeWidth="2"/><rect x="14" y="3" width="7" height="7" rx="1.5" stroke="#0D1B2A" strokeWidth="2"/><rect x="3" y="14" width="7" height="7" rx="1.5" stroke="#0D1B2A" strokeWidth="2"/><path d="M14 14h3v3M17 21h3M21 17v3" stroke="#0D1B2A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
-function PrintIcon()    { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M6 14h12v8H6z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function BoltIcon()     { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="#20643F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
-function WrenchActionIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function CalendarActionIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><rect x="3" y="4" width="18" height="18" rx="2" stroke="#0F4C81" strokeWidth="2"/><path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4" stroke="#0F4C81" strokeWidth="2" strokeLinecap="round"/></svg>; }
-function PlayIcon()     { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><polygon points="5 3 19 12 5 21 5 3" fill="rgba(255,255,255,0.9)" stroke="rgba(255,255,255,0.9)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
-function ChevronRightIcon({ cor = '#64748B' }) { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M9 18l6-6-6-6" stroke={cor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
+function BackIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M19 12H5M12 19l-7-7 7-7" stroke="#0D1B2A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="#0F4C81" strokeWidth="2" strokeLinecap="round" />
+      <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="#0F4C81" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ZoomIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <circle cx="11" cy="11" r="8" stroke="#FFFFFF" strokeWidth="2" />
+      <path d="m21 21-4.35-4.35M11 8v6M8 11h6" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PdfIcon({ color = '#EF4444', size = 18 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke={color} strokeWidth="2" strokeLinecap="round" />
+      <path d="M14 2v6h6M9 13h6M9 17h4" stroke={color} strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function WrenchIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"
+        stroke="#0F4C81" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// CORREÇÃO: CloseIcon para modais com fundo claro → stroke escuro explícito
+function CloseIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M18 6 6 18M6 6l12 12" stroke="#64748B" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// CORREÇÃO: CloseIconWhite exclusivo para o lightbox (fundo preto)
+function CloseIconWhite() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M18 6 6 18M6 6l12 12" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ExternalIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6M15 3h6v6M10 14 21 3"
+        stroke="#20643F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="#CBD5E1" strokeWidth="1.5" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"
+        stroke="#CBD5E1" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function QRCodeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="#0D1B2A" strokeWidth="2" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="#0D1B2A" strokeWidth="2" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="#0D1B2A" strokeWidth="2" />
+      <path d="M14 14h3v3M17 21h3M21 17v3" stroke="#0D1B2A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PrintIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"
+        stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" />
+      <path d="M6 14h12v8H6z" stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function BoltIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="#20643F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function WrenchActionIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"
+        stroke="#20643F" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CalendarActionIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="3" y="4" width="18" height="18" rx="2" stroke="#0F4C81" strokeWidth="2" />
+      <path d="M16 2v4M8 2v4M3 10h18M12 14v4M10 16h4" stroke="#0F4C81" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// CORREÇÃO: PlayIcon sobre fundo verde (#20643F) → fill e stroke brancos explícitos
+function PlayIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <polygon points="5 3 19 12 5 21 5 3"
+        fill="rgba(255,255,255,0.9)" stroke="rgba(255,255,255,0.9)"
+        strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ChevronRightIcon({ cor = '#64748B' }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M9 18l6-6-6-6" stroke={cor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 // ─── Estilos do Modal de Manual ───────────────────────────────
 const M = {
@@ -470,7 +607,8 @@ const M = {
   titulo:     { fontSize: '15px', fontWeight: '700', color: '#0D1B2A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   headerAcoes:{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 },
   linkExterno:{ display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 12px', backgroundColor: 'rgba(32,100,63,0.07)', border: '1px solid rgba(32,100,63,0.2)', borderRadius: '8px', fontSize: '12px', fontWeight: '600', color: '#20643F', textDecoration: 'none', flexShrink: 0 },
-  btnFechar:  { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '34px', height: '34px', border: '1.5px solid #E2E8F0', borderRadius: '8px', background: '#F8FAFC', cursor: 'pointer', color: '#64748B', flexShrink: 0 },
+  // CORREÇÃO: lineHeight:0 + padding:0 eliminam espaço fantasma que esmagava o SVG
+  btnFechar:  { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '34px', height: '34px', padding: 0, border: '1.5px solid #E2E8F0', borderRadius: '8px', background: '#F8FAFC', cursor: 'pointer', lineHeight: 0, flexShrink: 0 },
   corpo:      { flex: 1, overflow: 'hidden', backgroundColor: '#F4F7FA' },
   iframe:     { width: '100%', height: '100%', border: 'none', display: 'block', backgroundColor: '#F4F7FA' },
   semSrc:     { height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', padding: '24px', textAlign: 'center' },
@@ -482,14 +620,16 @@ const QRS = {
   box:       { backgroundColor: '#FFFFFF', borderRadius: '16px', width: '100%', maxWidth: '340px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 50px rgba(0,0,0,0.2)', animation: 'scaleIn 0.22s ease both' },
   header:    { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px', borderBottom: '1px solid #F1F5F9', gap: '8px' },
   titulo:    { fontSize: '14px', fontWeight: '700', color: '#0D1B2A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  btnFechar: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', border: '1px solid #E2E8F0', borderRadius: '7px', background: '#F8FAFC', cursor: 'pointer', color: '#64748B', flexShrink: 0 },
+  // CORREÇÃO: lineHeight:0 + padding:0 + display flex centralizado
+  btnFechar: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', padding: 0, border: '1px solid #E2E8F0', borderRadius: '7px', background: '#F8FAFC', cursor: 'pointer', lineHeight: 0, flexShrink: 0 },
   corpo:     { padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' },
   qrFrame:   { padding: '10px', backgroundColor: '#FFFFFF', border: '2.5px solid #0D1B2A', borderRadius: '12px', display: 'inline-flex' },
   hint:      { margin: 0, fontSize: '12px', color: '#64748B', textAlign: 'center', lineHeight: 1.55 },
   urlTexto:  { margin: 0, fontSize: '9.5px', color: '#94A3B8', wordBreak: 'break-all', textAlign: 'center', maxWidth: '280px' },
   footer:    { padding: '14px 18px', borderTop: '1px solid #F1F5F9', display: 'flex', gap: '8px' },
   btnCancelar:{ flex: 1, padding: '11px', backgroundColor: '#F1F5F9', color: '#64748B', border: 'none', borderRadius: '9px', fontSize: '13px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
-  btnPrint:  { flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#0D1B2A', color: '#FFFFFF', border: 'none', borderRadius: '9px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit' },
+  // CORREÇÃO: PrintIcon usa stroke branco explícito → botão preto (#0D1B2A)
+  btnPrint:  { flex: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', backgroundColor: '#0D1B2A', color: '#FFFFFF', border: 'none', borderRadius: '9px', fontSize: '13px', fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit', lineHeight: 1 },
 };
 
 // ─── Estilos das Ações Rápidas ────────────────────────────────
@@ -514,10 +654,11 @@ const CSS = `
 const S = {
   page:       { minHeight: '100dvh', backgroundColor: '#F4F7FA', fontFamily: "'DM Sans', 'Segoe UI', sans-serif" },
   topbar:     { position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: '8px', padding: '0 16px', height: '56px', backgroundColor: '#FFFFFF', borderBottom: '1px solid #E8EDF2' },
-  backBtn:    { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: 'none', background: 'none', cursor: 'pointer', color: '#0D1B2A', borderRadius: '8px', flexShrink: 0 },
+  // CORREÇÃO: lineHeight:0 + padding:0 nos botões da topbar
+  backBtn:    { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: 0, border: 'none', background: 'none', cursor: 'pointer', borderRadius: '8px', flexShrink: 0, lineHeight: 0 },
   topbarTitle:{ flex: 1, fontSize: '16px', fontWeight: '700', color: '#0D1B2A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.2px' },
-  qrBtn:      { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: '1.5px solid #E2E8F0', background: '#FFFFFF', cursor: 'pointer', color: '#0D1B2A', borderRadius: '8px', flexShrink: 0 },
-  editBtn:    { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: '1.5px solid #E2E8F0', background: '#FFFFFF', cursor: 'pointer', color: '#0F4C81', borderRadius: '8px', flexShrink: 0 },
+  qrBtn:      { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: 0, border: '1.5px solid #E2E8F0', background: '#FFFFFF', cursor: 'pointer', borderRadius: '8px', flexShrink: 0, lineHeight: 0 },
+  editBtn:    { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: 0, border: '1.5px solid #E2E8F0', background: '#FFFFFF', cursor: 'pointer', borderRadius: '8px', flexShrink: 0, lineHeight: 0 },
   main:       { padding: '0 0 40px 0', display: 'flex', flexDirection: 'column', gap: '0' },
   // Galeria
   galeriaSection:         { backgroundColor: '#FFFFFF', marginBottom: '12px' },
@@ -551,7 +692,8 @@ const S = {
   emptyPecas:     { margin: 0, fontSize: '13px', color: '#94A3B8', fontStyle: 'italic' },
   // Lightbox
   lightboxOverlay:{ position: 'fixed', inset: 0, zIndex: 200, backgroundColor: 'rgba(0,0,0,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.2s ease' },
-  lightboxClose:  { position: 'absolute', top: '16px', right: '16px', background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#FFFFFF', zIndex: 201 },
+  // CORREÇÃO: lineHeight:0 + padding:0 no botão de fechar do lightbox
+  lightboxClose:  { position: 'absolute', top: '16px', right: '16px', background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: '50%', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 201, padding: 0, lineHeight: 0 },
   lightboxImg:    { maxWidth: '96vw', maxHeight: '90dvh', objectFit: 'contain', borderRadius: '8px' },
   lightboxCounter:{ position: 'absolute', bottom: '20px', padding: '5px 14px', backgroundColor: 'rgba(0,0,0,0.5)', color: '#FFFFFF', borderRadius: '20px', fontSize: '13px', fontWeight: '600' },
 };
