@@ -429,11 +429,18 @@ export default function Usuarios() {
 
   useEffect(() => { fetchUsuarios(); }, [fetchUsuarios]);
 
-  const filtrados = usuarios.filter(u =>
-    u.nome_completo.toLowerCase().includes(busca.toLowerCase()) ||
-    u.email.toLowerCase().includes(busca.toLowerCase()) ||
-    u.cpf.includes(busca.replace(/\D/g, ''))
-  );
+  const termoBusca = busca.toLowerCase().trim();
+  const filtrados = usuarios.filter(u => {
+    if (!termoBusca) return true;
+    const nome  = (u.nome_completo ?? '').toLowerCase();
+    const email = isDummyEmail(u.email) ? '' : (u.email ?? '').toLowerCase();
+    const cpf   = (u.cpf ?? '').replace(/\D/g, '');
+    return (
+      nome.includes(termoBusca) ||
+      email.includes(termoBusca) ||
+      cpf.includes(termoBusca.replace(/\D/g, ''))
+    );
+  });
 
   const totalAdmins    = usuarios.filter(u => u.role === 'superadmin').length;
   const totalMecanicos = usuarios.filter(u => u.role === 'mecanico').length;
@@ -486,7 +493,7 @@ export default function Usuarios() {
 
         <div style={S.buscaWrapper}>
           <SearchIcon />
-          <input type="text" placeholder="Buscar por nome, CPF ou e-mail..."
+          <input type="text" placeholder="Buscar por CPF..."
             value={busca} onChange={e => setBusca(e.target.value)} style={S.buscaInput} />
           {busca && (
             <button onClick={() => setBusca('')} style={S.clearBtn}><CloseSmIcon /></button>

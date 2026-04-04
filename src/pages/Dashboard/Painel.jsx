@@ -193,6 +193,14 @@ function ItemPrevAtrasada({ ag, onClick }) {
 // ─── Tela principal ───────────────────────────────────────────
 
 export default function Painel() {
+  // ─── Safe Area: pinta a barra de status do Android com a cor do header ──
+  useEffect(() => {
+    document.documentElement.style.setProperty('--color-bg', '#20643F');
+    return () => {
+      document.documentElement.style.setProperty('--color-bg', '#F4F7FA');
+    };
+  }, []);
+
   const navigate = useNavigate();
   const { profile, isSuperAdmin, logout, showSecurityAlert, setShowSecurityAlert } = useAuthStore();
   const {
