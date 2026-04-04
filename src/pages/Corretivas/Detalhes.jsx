@@ -383,6 +383,22 @@ export default function DetalhesOS() {
     }
   };
 
+  // ─── Excluir OS (somente SuperAdmin) ─────────────────────────
+  const handleExcluirOS = async () => {
+    const confirmou = window.confirm(
+      'Tem certeza que deseja excluir permanentemente esta O.S.? Esta ação não pode ser desfeita.'
+    );
+    if (!confirmou) return;
+    try {
+      const { error } = await supabase.from('ordens_servico').delete().eq('id', id);
+      if (error) throw error;
+      navigate('/corretivas', { replace: true });
+    } catch (err) {
+      console.error('[DetalhesOS] handleExcluirOS:', err.message);
+      window.alert(`Erro ao excluir O.S.: ${err.message}`);
+    }
+  };
+
   if (loading) return <TelaCarregando />;
   if (erro || !os) return <TelaErro message={erro} onBack={() => navigate('/corretivas')} />;
 
@@ -527,6 +543,27 @@ export default function DetalhesOS() {
           </section>
         )}
 
+        {/* Botão Excluir OS (somente SuperAdmin) */}
+        {isSuperAdmin && (
+          <button
+            onClick={handleExcluirOS}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '13px', width: '100%',
+              backgroundColor: 'transparent',
+              color: '#DC2626',
+              border: '1.5px solid #DC2626',
+              borderRadius: '12px',
+              fontSize: '14px', fontWeight: '700',
+              cursor: 'pointer', fontFamily: 'inherit',
+              marginTop: '4px',
+            }}
+          >
+            <TrashIcon cor="#DC2626" size={16} />
+            Excluir O.S. permanentemente
+          </button>
+        )}
+
         {/* Botão salvar progresso */}
         {podeEditar && (
           <button
@@ -640,6 +677,13 @@ function SearchIcon()   { return <svg width="15" height="15" viewBox="0 0 24 24"
 function ObsIcon()      { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" stroke="#20643F" strokeWidth="2"/></svg>; }
 function TimelineIcon() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" stroke="#20643F" strokeWidth="2" strokeLinecap="round"/></svg>; }
 function SaveIcon()     { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ marginRight:7, flexShrink:0 }}><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M17 21v-8H7v8M7 3v5h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
+function TrashIcon({ cor = 'currentColor', size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0, marginRight: '6px' }}>
+      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" stroke={cor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
 function CheckIcon({ cor='#FFFFFF', size=16 }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ marginRight:7, flexShrink:0 }}><path d="M20 6L9 17l-5-5" stroke={cor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>; }
 function OfflineIcon()  { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.8M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>; }
 function QueueIcon()    { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" stroke="#92400E" strokeWidth="2" strokeLinecap="round"/><circle cx="9" cy="7" r="4" stroke="#92400E" strokeWidth="2"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" stroke="#92400E" strokeWidth="2" strokeLinecap="round"/></svg>; }

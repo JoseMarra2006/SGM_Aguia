@@ -18,7 +18,7 @@ export default function NovaOS() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { profile } = useAuthStore();
-  const { isOnline, addOSToQueue } = useAppStore();
+  const { isOnline, addOSToQueue, equipamentosCache } = useAppStore();
 
   const [equipamentoId, setEquipamentoId] = useState('');
   const [solicitante,   setSolicitante]   = useState('');
@@ -38,11 +38,23 @@ export default function NovaOS() {
     async function fetchDados() {
       setLoadingDados(true);
       try {
-        const { data: eqs } = await supabase
-          .from('equipamentos')
-          .select('id, nome, status')
-          .order('nome');
-        setEquipamentos(eqs ?? []);
+        if (!isOnline) {
+          // Modo offline: usa o cache local persistido pelo appStore
+          setEquipamentos(equipamentosCache);
+        } else {
+          // Modo online: fetch normal ao Supabase
+          try {
+            const { data: eqs } = await supabase
+              .from('equipamentos')
+              .select('id, nome, status')
+              .order('nome');
+            setEquipamentos(eqs ?? []);
+          } catch (fetchErr) {
+            // Fallback: Supabase falhou mesmo com rede — usa cache local
+            console.warn('[NovaOS] Fallback para cache de equipamentos:', fetchErr.message);
+            setEquipamentos(equipamentosCache);
+          }
+        }
         setSolicitante(profile?.nome_completo ?? '');
         if (equipFromUrl) setEquipamentoId(equipFromUrl);
       } catch (err) {
@@ -52,7 +64,7 @@ export default function NovaOS() {
       }
     }
     fetchDados();
-  }, [profile, equipFromUrl]);
+  }, [profile, equipFromUrl, isOnline]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Validação ───────────────────────────────────────────────────────────
   const validar = () => {

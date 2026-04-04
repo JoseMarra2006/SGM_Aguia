@@ -12,7 +12,6 @@ import { supabase } from './supabase';
 import { markAttemptFailed } from './storage';
 import useAppStore from '../store/appStore';
 
-const MAX_ATTEMPTS   = 5;
 const BACKOFF_BASE_MS = 2000;
 
 let networkListenerHandle = null;
@@ -24,7 +23,7 @@ let isProcessing = false;
 
 export async function initSync() {
   const status = await Network.getStatus();
-  useAppStore.getState().setOnline(status.connected);
+  useAppStore.getState().setIsOnline(status.connected);
 
   if (status.connected) {
     await processQueues();
@@ -34,9 +33,9 @@ export async function initSync() {
     'networkStatusChange',
     async (status) => {
       console.log('[Sync] Status de rede:', status.connectionType, '| Online:', status.connected);
-      useAppStore.getState().setOnline(status.connected);
+      useAppStore.getState().setIsOnline(status.connected);
       if (status.connected) {
-        await sleep(1500);
+        await sleep(4000);
         await processQueues();
       }
     }
@@ -96,13 +95,8 @@ async function processChecklistQueue() {
   const queue = [...store.checklistQueue];
 
   for (const item of queue) {
-    if (item.attempts >= MAX_ATTEMPTS) {
-      console.warn(`[Sync] Item ${item.localId} ignorado após ${item.attempts} tentativas.`);
-      continue;
-    }
-
     if (item.attempts > 0) {
-      const wait = BACKOFF_BASE_MS * Math.pow(2, item.attempts - 1);
+      const wait = Math.min(BACKOFF_BASE_MS * Math.pow(2, item.attempts - 1), 30000);
       console.log(`[Sync] Aguardando ${wait}ms antes de tentar novamente (tentativa ${item.attempts}).`);
       await sleep(wait);
     }
@@ -251,13 +245,8 @@ async function processOSQueue() {
   const queue = [...store.osQueue];
 
   for (const item of queue) {
-    if (item.attempts >= MAX_ATTEMPTS) {
-      console.warn(`[Sync] OS ${item.localId} ignorada após ${item.attempts} tentativas.`);
-      continue;
-    }
-
     if (item.attempts > 0) {
-      const wait = BACKOFF_BASE_MS * Math.pow(2, item.attempts - 1);
+      const wait = Math.min(BACKOFF_BASE_MS * Math.pow(2, item.attempts - 1), 30000);
       await sleep(wait);
     }
 

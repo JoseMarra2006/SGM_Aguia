@@ -66,11 +66,6 @@ const useAuthStore = create(
         }
         set({ _authInitialized: true });
 
-        // REMOVIDO: safetyTimeout — não é mais necessário pois o storage é
-        // síncrono após o warmup. O timeout era a causa do "Estado Zumbi":
-        // forçava isReady=true enquanto o Supabase ainda tentava resolver
-        // sua Promise interna de getSession, deixando o app em estado inconsistente.
-
         const checkSession = async () => {
           try {
             await waitForRehydration(get);
@@ -88,6 +83,18 @@ const useAuthStore = create(
 
             const { data: { session }, error } = await supabase.auth.getSession();
 
+            // ESCUDO OFFLINE ABSOLUTO — checkSession:
+            // Detecta ausência de rede tanto via navigator.onLine quanto via
+            // erros de fetch que o Supabase propaga ao tentar validar o token.
+            // Se o dispositivo está offline E o Zustand já tem um utilizador
+            // autenticado reidratado, ignoramos completamente o resultado do
+            // Supabase e avançamos com o cache — sem logout, sem limpeza.
+            const isOffline = !navigator.onLine || (error && error.message?.includes('fetch'));
+            if (isOffline && get().isAuthenticated) {
+              console.warn('[Auth] Offline: A usar sessão reidratada.');
+              return;
+            }
+
             if (error) throw error;
 
             if (session) {
@@ -99,6 +106,14 @@ const useAuthStore = create(
               return;
             }
           } catch (err) {
+            // ESCUDO OFFLINE ABSOLUTO — catch:
+            // Erros de rede (fetch failed, SSL timeout, ERR_NAME_NOT_RESOLVED)
+            // não devem disparar logout quando há um utilizador autenticado em
+            // cache. Registamos o erro e deixamos o finally definir isReady.
+            if (!navigator.onLine && get().isAuthenticated) {
+              console.warn('[Auth] Offline: Erro de rede ignorado, mantendo cache.', err.message);
+              return;
+            }
             console.error('[Auth] Erro ao recuperar sessão:', err.message);
             get()._forceLogoutAndReady();
             return;
@@ -120,7 +135,7 @@ const useAuthStore = create(
             // de login. Agora tratamos SIGNED_IN mesmo sem isLoading ativo,
             // mas apenas se o app ainda não estiver autenticado (evita duplicação).
             if (event === 'SIGNED_IN' && session) {
-              // Se já está autenticado com este usuário, ignora (evita re-render desnecessário)
+              // Se já está autenticado com este utilizador, ignora (evita re-render desnecessário)
               if (get().isAuthenticated && get().session?.user?.id === session.user.id) {
                 return;
               }
@@ -146,8 +161,20 @@ const useAuthStore = create(
               set({ session });
               await get()._loadProfile(session.user.id);
               get().updateActivity();
-            } else if (event === 'SIGNED_OUT') {
-              get()._clearAuthState();
+            } else {
+              // ESCUDO OFFLINE ABSOLUTO — onAuthStateChange:
+              // O Supabase pode emitir eventos destrutivos (SIGNED_OUT, USER_DELETED,
+              // sessão nula) quando falha em renovar o token sem rede. Bloqueamos
+              // qualquer limpeza de estado enquanto o dispositivo estiver offline,
+              // protegendo profile, isAuthenticated e isSuperAdmin reidratados.
+              if (!navigator.onLine) {
+                console.warn('[Auth] Offline: Ignorando evento destrutivo do Supabase.');
+                return;
+              }
+
+              if (event === 'SIGNED_OUT') {
+                get()._clearAuthState();
+              }
             }
           }
         );

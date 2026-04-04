@@ -13,6 +13,9 @@
 //   • Botões de ação (logout, sino, fechar) têm color explícita reforçada.
 //   • lineHeight:0 / fontSize:0 adicionado aos botões que contêm apenas SVG
 //     para eliminar espaço fantasma que esmagava o ícone.
+// OFFLINE (Graceful Degradation):
+//   • Early return: se !isOnline → renderiza <OfflinePainel /> em vez do
+//     dashboard completo, restringindo o mecânico às ações vitais offline.
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -20,6 +23,7 @@ import { supabase } from '../../services/supabase';
 import useAuthStore from '../../store/authStore';
 import useAppStore from '../../store/appStore';
 import { SecurityAlertModal } from '../Login/Login.jsx';
+import OfflinePainel from './OfflinePainel.jsx';
 import logoEmpresa from '../../assets/logo_empresa.png';
 import {
   subscribeToNotificacoes,
@@ -28,12 +32,6 @@ import {
 } from '../../services/notifications';
 
 // ─── Helpers ──────────────────────────────────────────────────
-
-function formatarDataHora(ts) {
-  if (!ts) return '—';
-  const d = new Date(ts);
-  return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-}
 
 function calcularDuracao(inicio) {
   if (!inicio) return '—';
@@ -199,7 +197,7 @@ export default function Painel() {
   const { profile, isSuperAdmin, logout, showSecurityAlert, setShowSecurityAlert } = useAuthStore();
   const {
     isOnline, checklistQueue, osQueue,
-    notifications, unreadCount, notifPanelOpen,
+    unreadCount, notifPanelOpen,
     loadNotifications, addNotification, setNotifPanelOpen,
     clearNotifications,
   } = useAppStore();
@@ -227,6 +225,7 @@ export default function Painel() {
 
   // ─── Métricas ───────────────────────────────────────────────
   useEffect(() => {
+    if (!isOnline) return;
     async function fetchMetricas() {
       setLoadingMetricas(true);
       try {
@@ -256,10 +255,11 @@ export default function Painel() {
       }
     }
     fetchMetricas();
-  }, []);
+  }, [isOnline]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Listas (OS ativas + Preventivas atrasadas) ─────────────
   useEffect(() => {
+    if (!isOnline) return;
     async function fetchListas() {
       setLoadingListas(true);
       try {
@@ -296,7 +296,11 @@ export default function Painel() {
       }
     }
     fetchListas();
-  }, [isSuperAdmin, profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOnline, isSuperAdmin, profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── GRACEFUL DEGRADATION: modo offline ─────────────────────
+  // Todos os hooks já foram chamados acima — seguro fazer early return aqui.
+  if (!isOnline) return <OfflinePainel />;
 
   const pendentesSync = checklistQueue.length + osQueue.length;
 
@@ -335,9 +339,6 @@ export default function Painel() {
             <span style={S.headerNome}>Olá, {profile?.nome_completo?.split(' ')[0] ?? 'usuário'}</span>
           </div>
           <div style={S.headerAcoes}>
-            {!isOnline && (
-              <div style={S.offlinePill}><OfflineIcon /> Offline</div>
-            )}
             <button onClick={() => setNotifPanelOpen(true)} style={S.btnSino} title="Notificações"
               aria-label={`Notificações${unreadCount > 0 ? ` (${unreadCount} não lidas)` : ''}`}>
               <BellNavIcon />
@@ -496,9 +497,6 @@ function EmptyLista({ icone, texto }) {
 }
 
 // ─── Ícones ───────────────────────────────────────────────────
-// CORREÇÃO: flexShrink:0 + display:'block' em todos os SVGs de botões de ação.
-// stroke explícito (não currentColor) nos ícones dentro de botões coloridos
-// para garantir visibilidade no Capacitor WebView.
 
 function CloseIcon() {
   return (
@@ -538,8 +536,6 @@ function TimerSmIcon() {
   );
 }
 
-// CORREÇÃO: BellNavIcon e LogoutIcon usam stroke branco explícito
-// pois ficam sobre fundo verde (#20643F) — currentColor falha no WebView.
 function BellNavIcon() {
   return (
     <svg width="19" height="19" viewBox="0 0 24 24" fill="none"
@@ -645,16 +641,6 @@ function BoxAcaoIcon() {
   );
 }
 
-function OfflineIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-      style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.8M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01"
-        stroke="#FFFFFF" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function SyncIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
@@ -665,9 +651,6 @@ function SyncIcon() {
   );
 }
 
-// CORREÇÃO: ícones da bottom nav usam stroke explícito com fallback
-// pois `color` via CSS pode não herdar corretamente no Capacitor WebView.
-// A cor ativa/inativa é controlada pelo estilo do botão pai via CSS class.
 function HomeIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
@@ -729,7 +712,6 @@ const NS = {
   unreadBadge:   { padding: '2px 8px', borderRadius: '20px', backgroundColor: '#20643F', color: '#FFFFFF', fontSize: '11px', fontWeight: '700' },
   headerAcoes:   { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
   btnMarcarTodas:{ padding: '5px 10px', borderRadius: '7px', border: '1.5px solid #E2E8F0', backgroundColor: '#F8FAFC', color: '#64748B', fontSize: '11px', fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit' },
-  // CORREÇÃO: lineHeight:0 elimina espaço fantasma de texto; display+alignItems+justifyContent garantem centralização do SVG
   btnFechar:     { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', border: '1px solid #E2E8F0', borderRadius: '7px', background: '#F8FAFC', cursor: 'pointer', color: '#64748B', lineHeight: 0, padding: 0 },
   lista:         { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' },
   vazio:         { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', padding: '40px' },
@@ -754,8 +736,6 @@ const S = {
   headerSub:          { fontSize: '10px', color: 'rgba(255,255,255,0.6)', fontWeight: '600', letterSpacing: '1px', textTransform: 'uppercase' },
   headerNome:         { fontSize: '16px', color: '#FFFFFF', fontWeight: '700', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   headerAcoes:        { display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 },
-  offlinePill:        { display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: '20px', fontSize: '11px', color: '#FFFFFF', fontWeight: '600' },
-  // CORREÇÃO: lineHeight:0 + padding:0 + display/align/justify garantem SVG centralizado sem espaço fantasma
   btnSino:            { position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: 0, border: '1.5px solid rgba(255,255,255,0.5)', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)', cursor: 'pointer', lineHeight: 0 },
   sinoBadge:          { position: 'absolute', top: '-5px', right: '-5px', minWidth: '17px', height: '17px', padding: '0 4px', borderRadius: '10px', backgroundColor: '#EF4444', color: '#FFFFFF', fontSize: '10px', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #20643F' },
   btnLogout:          { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', padding: 0, border: '1.5px solid rgba(255,255,255,0.5)', borderRadius: '8px', backgroundColor: 'rgba(255,255,255,0.15)', cursor: 'pointer', lineHeight: 0 },

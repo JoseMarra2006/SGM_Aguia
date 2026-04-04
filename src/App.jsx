@@ -6,6 +6,7 @@ import {
   Outlet, useLocation, useNavigate,
 } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
+import { Network }       from '@capacitor/network';
 import { Dialog }        from '@capacitor/dialog';
 import useAuthStore  from './store/authStore.js';
 import useAppStore   from './store/appStore.js';
@@ -27,16 +28,11 @@ import NovaOS              from './pages/Corretivas/NovaOS.jsx';
 import DetalhesOS          from './pages/Corretivas/Detalhes.jsx';
 
 // ─── Tela de carregamento ──────────────────────────────────────────────────
-// Exibida enquanto initAuth verifica se há sessão ativa (F5 / reload).
-//
-// RESPONSIVIDADE: usa 100dvh (Dynamic Viewport Height) em vez de 100vh para
-// que a tela de splash preencha exatamente a viewport visível em mobile,
-// sem ser cortada pela barra de endereço retrátil ou pela status bar.
 function SplashScreen() {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      height: '100dvh',                 // dvh: viewport dinâmica (mobile-safe)
+      height: '100dvh',
       backgroundColor: '#0F4C81',
       flexDirection: 'column', gap: '16px',
     }}>
@@ -63,7 +59,7 @@ function Placeholder({ title }) {
     <div style={{
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       justifyContent: 'center',
-      height: '100dvh',               // dvh: viewport dinâmica (mobile-safe)
+      height: '100dvh',
       gap: '12px',
       fontFamily: "'DM Sans', sans-serif", color: '#64748B', backgroundColor: '#F8F9FB',
     }}>
@@ -78,16 +74,7 @@ function Placeholder({ title }) {
 }
 
 // ─── Guardas de rota ──────────────────────────────────────────────────────
-//
-// REGRA: Todas as guardas dependem de `isReady` para saber se initAuth terminou.
-// Enquanto !isReady → SplashScreen (initAuth ainda está verificando sessão).
-// Após isReady=true → decisão de rota baseada em isAuthenticated.
 
-/**
- * Rota privada: exige autenticação.
- * Se !isReady → SplashScreen.
- * Se !isAuthenticated → redireciona para /login.
- */
 function PrivateRoute() {
   const { isAuthenticated, isReady } = useAuthStore();
   const location = useLocation();
@@ -97,10 +84,6 @@ function PrivateRoute() {
   return <Outlet />;
 }
 
-/**
- * Subrota exclusiva para SuperAdmin.
- * Assume que já está dentro de PrivateRoute (isReady e isAuthenticated garantidos).
- */
 function SuperAdminRoute() {
   const { isSuperAdmin, isReady } = useAuthStore();
 
@@ -109,19 +92,18 @@ function SuperAdminRoute() {
   return <Outlet />;
 }
 
-/**
- * Rota pública: redireciona para /dashboard se já autenticado.
- * Se !isReady → SplashScreen.
- * Só redireciona se isAuthenticated E senha_alterada=true
- * (usuários que ainda precisam trocar senha ficam no Login para ver o modal).
- */
+function AdminOnly({ children }) {
+  const { isSuperAdmin, isReady } = useAuthStore();
+  if (!isReady)      return <SplashScreen />;
+  if (!isSuperAdmin) return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
 function PublicOnlyRoute() {
   const { isAuthenticated, isReady, profile } = useAuthStore();
 
   if (!isReady) return <SplashScreen />;
 
-  // ⚠️ Só redireciona se o usuário já completou o primeiro acesso.
-  // Se senha_alterada=false, Login.jsx mostrará o modal de troca — não interferir.
   if (isAuthenticated && profile?.senha_alterada) {
     return <Navigate to="/dashboard" replace />;
   }
@@ -129,62 +111,34 @@ function PublicOnlyRoute() {
   return <Outlet />;
 }
 
-// ─── Rotas raiz (sem histórico para voltar) ───────────────────────────────
-// Nestas rotas, pressionar Voltar exibe o diálogo de saída em vez de navegar.
+// ─── Rotas raiz ───────────────────────────────────────────────────────────
 const ROOT_ROUTES = ['/dashboard', '/login', '/'];
 
 // ─── Handler do botão Voltar do Android ──────────────────────────────────
-//
-// ARQUITETURA:
-//  • Componente sem UI posicionado DENTRO do BrowserRouter, garantindo
-//    acesso ao contexto do React Router (useNavigate, useLocation).
-//
-//  • O listener do Capacitor é registrado UMA ÚNICA VEZ (deps=[]).
-//    Para evitar closures obsoletos com a rota atual, usamos locationRef —
-//    uma ref atualizada a cada mudança de location sem recriar o listener.
-//
-//  • Lógica de decisão:
-//      1. `window.history.state?.idx > 0` → React Router v6 grava o índice
-//         da entrada no estado do History API. Se idx > 0, existe histórico
-//         real para navegar de volta.
-//      2. Se a rota atual for uma ROOT_ROUTE (sem contexto de "voltar"),
-//         tratamos como raiz independentemente do idx.
-//      3. Ambas as condições falsas → diálogo de confirmação de saída.
-//
-//  • Limpeza: listenerHandle.remove() no retorno do useEffect garante que
-//    o listener seja removido se o componente for desmontado (StrictMode,
-//    HMR etc.), prevenindo vazamentos de memória.
-
 function BackButtonHandler() {
   const navigate    = useNavigate();
   const location    = useLocation();
   const locationRef = useRef(location);
 
-  // Mantém locationRef sincronizado com a rota atual
   useEffect(() => {
     locationRef.current = location;
   }, [location]);
 
-  // Registra o listener UMA vez durante a vida do componente
   useEffect(() => {
     let listenerHandle = null;
 
     const setupListener = async () => {
       listenerHandle = await CapApp.addListener('backButton', async () => {
         const currentPath = locationRef.current.pathname;
-
-        // Verifica se há histórico real de navegação (React Router v6 / History API)
         const historyIdx  = window.history.state?.idx ?? 0;
         const isRootRoute = ROOT_ROUTES.includes(currentPath);
         const canGoBack   = historyIdx > 0 && !isRootRoute;
 
         if (canGoBack) {
-          // Há histórico e não estamos numa rota raiz → navega para trás
           navigate(-1);
           return;
         }
 
-        // Estamos na raiz ou sem histórico → confirma saída
         const { value: confirmed } = await Dialog.confirm({
           title:             'Sair do aplicativo',
           message:           'Tem certeza que deseja sair do aplicativo? Não se preocupe, as suas atividades ficarão salvas e seu login permanecerá ativo por até 24h.',
@@ -195,13 +149,11 @@ function BackButtonHandler() {
         if (confirmed) {
           await CapApp.exitApp();
         }
-        // Se cancelou, não faz nada — app continua aberto
       });
     };
 
     setupListener();
 
-    // Cleanup: remove o listener ao desmontar para evitar vazamento de memória
     return () => {
       if (listenerHandle) {
         listenerHandle.remove();
@@ -209,32 +161,101 @@ function BackButtonHandler() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return null; // Componente sem UI
+  return null;
 }
 
-// ─── Solução 1: AppStateHandler ───────────────────────────────────────────
+// ─── NetworkHandler ───────────────────────────────────────────────────────
 //
-// PROBLEMA RAIZ:
-//   Quando o SO pausa o app (background), a interface de rede é suspensa.
-//   O cliente Supabase continua tentando renovar o JWT e manter o WebSocket
-//   do Realtime ativo — falhas que resultam em ERR_NAME_NOT_RESOLVED.
-//   Ao voltar para foreground, o token pode ter expirado e os canais Realtime
-//   estão em estado inconsistente.
+// Componente sem UI responsável por manter appStore.isOnline sincronizado
+// com o estado real da rede via @capacitor/network.
 //
-// SOLUÇÃO:
-//   • background  → stopAutoRefresh(): pausa renovação de token (sem rede, sem sentido)
-//   • foreground  → startAutoRefresh(): reinicia renovação e revalida sessão
-//   • foreground  → dispara evento DOM 'app-foreground': qualquer componente
-//                   pode reagir (re-fetch de dados, renovar subscription, etc.)
-//   • foreground  → initSync(): tenta sincronizar filas offline acumuladas
-//
-// COMO REAGIR EM OUTROS COMPONENTES (exemplo):
-//   useEffect(() => {
-//     const onForeground = () => fetchMeusDados();
-//     window.addEventListener('app-foreground', onForeground);
-//     return () => window.removeEventListener('app-foreground', onForeground);
-//   }, []);
+// ARQUITETURA:
+//  • No mount: lê o status atual com Network.getStatus() para garantir que
+//    o estado inicial seja correto independente de navigator.onLine.
+//  • Listener 'networkStatusChange': atualiza setIsOnline em tempo real a
+//    cada mudança de conectividade (Wi-Fi → dados → offline e vice-versa).
+//  • Cleanup: remove o listener ao desmontar (StrictMode / HMR safe).
 
+function NetworkHandler() {
+  const setIsOnline = useAppStore((s) => s.setIsOnline);
+
+  useEffect(() => {
+    let listenerHandle = null;
+
+    const setup = async () => {
+      // Leitura inicial — pode diferir de navigator.onLine em alguns dispositivos
+      try {
+        const status = await Network.getStatus();
+        setIsOnline(status.connected);
+      } catch (err) {
+        console.warn('[Network] Falha ao ler status inicial:', err.message);
+      }
+
+      // Listener em tempo real
+      listenerHandle = await Network.addListener('networkStatusChange', (status) => {
+        console.log(`[Network] Status alterado → ${status.connected ? 'online' : 'offline'} (${status.connectionType})`);
+        setIsOnline(status.connected);
+      });
+    };
+
+    setup();
+
+    return () => {
+      if (listenerHandle) {
+        listenerHandle.remove();
+      }
+    };
+  }, [setIsOnline]);
+
+  return null;
+}
+
+// ─── Banner Global Offline ────────────────────────────────────────────────
+//
+// Faixa de aviso exibida em TODAS as telas enquanto !isOnline.
+// Posicionada fora do #app-shell para cobrir o layout inteiro,
+// imediatamente abaixo do safe-area-inset-top (via position sticky/fixed
+// gerenciado pelo fluxo normal do documento).
+//
+// NÃO usa position:fixed para não interferir com o scroll nativo.
+
+function OfflineBanner() {
+  const isOnline = useAppStore((s) => s.isOnline);
+
+  if (isOnline) return null;
+
+  return (
+    <div style={{
+      display:         'flex',
+      alignItems:      'center',
+      justifyContent:  'center',
+      gap:             '8px',
+      padding:         '9px 16px',
+      backgroundColor: '#F59E0B',
+      color:           '#78350F',
+      fontSize:        '12px',
+      fontWeight:      '600',
+      fontFamily:      "'DM Sans','Segoe UI',sans-serif",
+      lineHeight:      1.4,
+      textAlign:       'center',
+      position:        'sticky',
+      top:             0,
+      zIndex:          100,
+      boxShadow:       '0 2px 8px rgba(245,158,11,0.3)',
+    }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+        style={{ display: 'block', flexShrink: 0 }}>
+        <path
+          d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.8M10.71 5.05A16 16 0 0122.56 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01"
+          stroke="#78350F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        />
+      </svg>
+      Modo Offline: Funcionalidades limitadas. Suas ações estão sendo salvas no dispositivo.
+    </div>
+  );
+}
+
+// ─── AppStateHandler ──────────────────────────────────────────────────────
 function AppStateHandler() {
   const { isAuthenticated } = useAuthStore();
 
@@ -245,24 +266,16 @@ function AppStateHandler() {
       handle = await CapApp.addListener('appStateChange', async ({ isActive }) => {
 
         if (!isActive) {
-          // ── App foi para background ────────────────────────────────────
-          // Para o ciclo de auto-refresh para economizar bateria e evitar
-          // requisições contra uma interface de rede suspensa pelo SO.
           supabase.auth.stopAutoRefresh();
           console.log('[AppState] Background → autoRefresh pausado.');
           return;
         }
 
-        // ── App voltou para foreground ─────────────────────────────────
         console.log('[AppState] Foreground → retomando sessão...');
 
         try {
-          // 1. Reinicia auto-refresh antes de qualquer coisa
           await supabase.auth.startAutoRefresh();
 
-          // 2. Força a revalidação do token agora, não aguardando o próximo ciclo.
-          //    Se o token expirou durante o background, esta chamada o renova.
-          //    Se a sessão é inválida, retorna session: null → authStore.logout().
           const { data: { session }, error } = await supabase.auth.getSession();
 
           if (error) {
@@ -272,31 +285,22 @@ function AppStateHandler() {
 
           if (!session) {
             console.warn('[AppState] Sessão expirada durante background.');
-            // O listener onAuthStateChange no authStore tratará o SIGNED_OUT
             return;
           }
 
-          // 3. Sinaliza aos componentes que o app voltou ao foreground.
-          //    Painel.jsx e outros podem ouvir este evento para re-buscar dados
-          //    e garantir que suas subscrições Realtime estão ativas.
           window.dispatchEvent(new CustomEvent('app-foreground'));
 
-          // 4. Tenta sincronizar filas offline (checklists/OS) acumuladas
-          //    enquanto o app estava sem conexão ou em background.
           initSync().catch((err) =>
             console.warn('[AppState] Falha ao sincronizar após foreground:', err.message)
           );
 
           console.log('[AppState] Foreground → sessão válida, componentes notificados.');
         } catch (err) {
-          // Não deixa erro não tratado quebrar o handler silenciosamente
           console.error('[AppState] Erro no handler de foreground:', err.message);
         }
       });
     };
 
-    // Só registra o listener se há uma sessão ativa
-    // (evita overhead em telas de login)
     if (isAuthenticated) {
       setup();
     }
@@ -306,30 +310,25 @@ function AppStateHandler() {
     };
   }, [isAuthenticated]);
 
-  return null; // Componente sem UI
+  return null;
 }
 
-// ─── Inicializador global ─────────────────────────────────────────────────
-// Componente sem UI que inicializa auth e serviços na montagem inicial.
-// useEffect com [] garante que initAuth rode exatamente uma vez.
-// (authStore.initAuth tem guarda interna _authInitialized para React StrictMode)
+// ─── AppInitializer ───────────────────────────────────────────────────────
 function AppInitializer() {
-  const initAuth       = useAuthStore((s) => s.initAuth);
-  const loadLastSyncAt = useAppStore((s) => s.loadLastSyncAt);
-  const loadQueues     = useAppStore((s) => s.loadQueuesFromStorage);
+  const initAuth              = useAuthStore((s) => s.initAuth);
+  const loadLastSyncAt        = useAppStore((s) => s.loadLastSyncAt);
+  const loadQueues            = useAppStore((s) => s.loadQueuesFromStorage);
+  const syncEquipamentosCache = useAppStore((s) => s.syncEquipamentosCache);
 
   useEffect(() => {
-    // initAuth retorna uma função de cleanup (unsubscribe do listener Supabase)
     const unsubAuth = initAuth();
 
-    // Carrega estado offline
-    loadQueues();
-    loadLastSyncAt();
+    Promise.all([loadQueues(), loadLastSyncAt()]).then(() => {
+      initSync();
+    });
 
-    // Inicia motor de sincronização offline→online
-    initSync();
+    syncEquipamentosCache();
 
-    // Estilos globais injetados uma vez
     const style = document.createElement('style');
     style.textContent = `
       @keyframes spin { to { transform: rotate(360deg); } }
@@ -351,99 +350,65 @@ function AppInitializer() {
 // ─── App principal ────────────────────────────────────────────────────────
 //
 // RESPONSIVIDADE — Safe Area Insets:
-//   O wrapper externo (#app-shell) aplica padding usando env() para respeitar:
-//     • Status bar (bateria/hora/notch) no topo  → padding-top
-//     • Barra de gestos do Android/iOS no rodapé → padding-bottom
-//     • Bordas laterais em iPhones com Dynamic Island → padding-left/right
+//   minHeight: 100dvh permite que o conteúdo cresça além da viewport,
+//   devolvendo o scroll nativo ao aparelho. overflow NÃO é definido aqui.
 //
-//   max(env(...), Xpx) garante um mínimo legível mesmo em dispositivos sem
-//   safe area real (tablets com borda plana, emuladores, browser desktop).
-//
-//   height: 100dvh no shell garante que o app preencha exatamente a viewport
-//   dinâmica visível — sem overflow quando a barra de endereço do browser
-//   aparece/desaparece em mobile.
-//
-//   ATENÇÃO: Para que env(safe-area-inset-*) funcione no Capacitor/WebView,
-//   o index.html DEVE conter:
-//     <meta name="viewport" content="width=device-width, initial-scale=1,
-//           viewport-fit=cover">
+// OFFLINE BANNER:
+//   OfflineBanner é renderizado DENTRO do #app-shell, acima das rotas,
+//   mas não afeta o roteamento. Usa position:sticky para acompanhar o
+//   scroll sem sobrepor conteúdo de forma inesperada.
 
 export default function App() {
   return (
     <BrowserRouter>
-      {/*
-        AppInitializer, BackButtonHandler e AppStateHandler são posicionados
-        DENTRO do BrowserRouter para terem acesso ao contexto do React Router.
-        Todos são componentes sem UI (retornam null).
-
-        Ordem importa:
-          1. AppInitializer    → inicializa auth e serviços
-          2. BackButtonHandler → registra listener do back button nativo
-          3. AppStateHandler   → resiliência a background/foreground
-      */}
       <AppInitializer />
       <BackButtonHandler />
       <AppStateHandler />
+      {/* NetworkHandler: detecta mudanças de rede via @capacitor/network */}
+      <NetworkHandler />
 
-      {/*
-        #app-shell — container raiz do layout visual.
-
-        Estrutura:
-          display: flex + flex-direction: column → permite que filhos usem
-            flex: 1 para ocupar o espaço restante (scrollable content area).
-          height: 100dvh → viewport dinâmica; não corta em mobile.
-          overflow: hidden → o scroll acontece nos filhos, não aqui.
-          padding safe area → afasta conteúdo da status bar e barra de gestos.
-      */}
       <div
         id="app-shell"
         style={{
           display:       'flex',
           flexDirection: 'column',
-          height:        '100dvh',
-          overflow:      'hidden',
-          // Safe area: topo (status bar / notch)
+          minHeight:     '100dvh',
           paddingTop:    'max(env(safe-area-inset-top, 0px), 0px)',
-          // Safe area: rodapé (barra de gestos Android/iOS)
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-          // Safe area: laterais (Dynamic Island, punched-holes)
           paddingLeft:   'env(safe-area-inset-left,  0px)',
           paddingRight:  'env(safe-area-inset-right, 0px)',
-          // Herda background global definido em index.css
           backgroundColor: 'var(--color-bg, #F4F7FA)',
         }}
       >
+        {/* Banner amarelo global — visível em todas as telas quando offline */}
+        <OfflineBanner />
+
         <Routes>
           {/* Raiz → dashboard */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-          {/* Rotas públicas (apenas visitantes não autenticados) */}
+          {/* Rotas públicas */}
           <Route element={<PublicOnlyRoute />}>
             <Route path="/login" element={<Login />} />
           </Route>
 
-          {/* Rotas privadas (exige autenticação) */}
+          {/* Rotas privadas */}
           <Route element={<PrivateRoute />}>
-            {/* Dashboard central */}
             <Route path="/dashboard" element={<Painel />} />
             <Route path="/perfil"    element={<Placeholder title="Meu Perfil" />} />
 
-            {/* Módulo 1 — Equipamentos */}
-            <Route path="/equipamentos"     element={<Listagem />} />
-            <Route path="/equipamentos/:id" element={<Detalhe />} />
+            <Route path="/equipamentos"      element={<Listagem />} />
+            <Route path="/equipamentos/novo" element={<AdminOnly><Cadastro /></AdminOnly>} />
+            <Route path="/equipamentos/:id"  element={<Detalhe />} />
 
-            {/* Módulo 2 — Preventivas */}
             <Route path="/preventivas"                          element={<ListagemPreventivas />} />
             <Route path="/preventivas/:agendamentoId/checklist" element={<Checklist />} />
 
-            {/* Módulo 3 — Corretivas */}
             <Route path="/corretivas"      element={<ListagemCorretivas />} />
             <Route path="/corretivas/nova" element={<NovaOS />} />
             <Route path="/corretivas/:id"  element={<DetalhesOS />} />
 
-            {/* Apenas SuperAdmin */}
             <Route element={<SuperAdminRoute />}>
-              <Route path="/equipamentos/novo"  element={<Cadastro />} />
               <Route path="/dashboard/usuarios" element={<Usuarios />} />
               <Route path="/dashboard/pecas"    element={<Pecas />} />
             </Route>

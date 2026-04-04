@@ -26,7 +26,7 @@ import {
  *  2. Filas de dados pendentes de sincronização
  *  3. Timers de OS em andamento
  *  4. Estado de sincronização
- *  5. Sistema de notificações (NEW)
+ *  5. Sistema de notificações
  */
 
 const useAppStore = create(
@@ -35,8 +35,16 @@ const useAppStore = create(
     // ─────────────────────────────────────────
     // ESTADO: Rede
     // ─────────────────────────────────────────
-    isOnline: true,
-    setOnline: (status) => set({ isOnline: status }),
+
+    /**
+     * Inicializado com navigator.onLine para que o valor já seja correto
+     * no primeiro render, antes de qualquer evento do Capacitor Network.
+     * Atualizado em tempo real pelo NetworkHandler em App.jsx.
+     */
+    isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+
+    /** @param {boolean} status */
+    setIsOnline: (status) => set({ isOnline: status }),
 
     // ─────────────────────────────────────────
     // ESTADO: Filas Offline
@@ -53,7 +61,10 @@ const useAppStore = create(
         getChecklistQueue(),
         getOSQueue(),
       ]);
-      set({ checklistQueue, osQueue });
+      set({
+        checklistQueue: checklistQueue.map(i => ({ ...i, attempts: 0 })),
+        osQueue:        osQueue.map(i => ({ ...i, attempts: 0 })),
+      });
     },
 
     addChecklistToQueue: async (item) => {
@@ -96,7 +107,7 @@ const useAppStore = create(
     lastSyncAt:    null,
     lastSyncError: null,
 
-    setSyncing:  (status)  => set({ isSyncing: status }),
+    setSyncing:   (status) => set({ isSyncing: status }),
     setSyncError: (msg)    => set({ lastSyncError: msg, isSyncing: false }),
 
     setSyncSuccess: async () => {
@@ -144,7 +155,7 @@ const useAppStore = create(
     },
 
     // ─────────────────────────────────────────
-    // ESTADO: Notificações (NEW)
+    // ESTADO: Notificações
     // ─────────────────────────────────────────
 
     /** @type {object[]}  Lista completa de notificações do usuário logado */
@@ -225,6 +236,39 @@ const useAppStore = create(
 
     /** Limpa todas as notificações do estado (ao fazer logout). */
     clearNotifications: () => set({ notifications: [], unreadCount: 0, notifPanelOpen: false }),
+
+    // ─────────────────────────────────────────
+    // ESTADO: Cache de Equipamentos (Offline-First)
+    // ─────────────────────────────────────────
+
+    /**
+     * Lista básica de equipamentos (id + nome) persistida localmente.
+     * Usada como fallback em NovaOS quando o dispositivo está offline.
+     * @type {{ id: string, nome: string }[]}
+     */
+    equipamentosCache: [],
+
+    /**
+     * Sincroniza o cache de equipamentos com o Supabase.
+     * Só executa se houver internet. Falhas são silenciosas para não
+     * bloquear o fluxo de inicialização da app.
+     */
+    syncEquipamentosCache: async () => {
+      const online = get().isOnline ?? (typeof navigator !== 'undefined' ? navigator.onLine : false);
+      if (!online) return;
+      try {
+        const { supabase } = await import('../services/supabase');
+        const { data, error } = await supabase
+          .from('equipamentos')
+          .select('id, nome')
+          .order('nome');
+        if (error) throw error;
+        if (data) set({ equipamentosCache: data });
+      } catch (err) {
+        // Silencioso — cache desatualizado é melhor que crash
+        console.warn('[appStore] syncEquipamentosCache falhou silenciosamente:', err.message);
+      }
+    },
   }))
 );
 

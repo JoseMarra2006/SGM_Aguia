@@ -2,7 +2,7 @@
    Resetado para ambiente mobile/web: sem dark-mode padrão do Vite,
    sem centralização vertical do body que quebra páginas full-height.
 
-   ── Correções de responsividade (v2) ──────────────────────────────────────
+   ── Correções de responsividade (v3) ──────────────────────────────────────
    • 100vh → 100dvh  (Dynamic Viewport Height): resolve corte de botões em
      mobile causado pela barra de endereço retrátil do browser / Capacitor.
    • body e #root com min-height: 100dvh + display:flex + flex-direction:column
@@ -12,6 +12,8 @@
    • Viewport meta no HTML deve ter `viewport-fit=cover` para que env() funcione:
        <meta name="viewport" content="width=device-width, initial-scale=1,
              viewport-fit=cover">
+   • overflow-x: hidden no body evita scroll horizontal indesejado; o scroll
+     vertical fica livre (auto) para conteúdo longo fluir naturalmente.
 */
 
 :root {
@@ -53,7 +55,9 @@ a:hover {
 /* ── Body: coluna flex que preenche toda a viewport dinâmica ─────────────
    display:flex + flex-direction:column + min-height:100dvh permitem que
    o filho #root (ou qualquer <main>) use flex:1 para ocupar o espaço restante
-   sem criar scroll na janela raiz. */
+   sem criar scroll na janela raiz.
+   overflow-x: hidden  → bloqueia scroll horizontal indesejado.
+   overflow-y: auto    → scroll vertical liberado para conteúdo longo. */
 body {
   margin: 0;
   padding: 0;
@@ -62,6 +66,8 @@ body {
   min-width: 320px;
   min-height: 100dvh;          /* dvh em vez de vh — resolve corte em mobile */
   background-color: #F4F7FA;
+  overflow-x: hidden;          /* sem scroll horizontal */
+  overflow-y: auto !important; /* scroll vertical nativo liberado           */
 
   /* ── Safe Areas no body ────────────────────────────────────────────────
      padding-top  : afasta o conteúdo da status bar (bateria/hora/notch).
@@ -74,13 +80,14 @@ body {
 }
 
 /* ── #root: herda a coluna flex e preenche todo o espaço disponível ──────
-   flex:1 + min-height:0 evitam o bug clássico onde o filho com overflow:auto
-   não respeita a altura do pai em colunas flex. */
+   min-height: 100dvh garante que o root ocupe a viewport inteira mesmo quando
+   o conteúdo é curto, sem engessar a altura máxima — o conteúdo longo cresce
+   livremente e o scroll nativo do documento funciona. */
 #root {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 0;               /* necessário para overflow interno funcionar */
+  min-height: 100dvh;          /* ocupa a viewport; cresce com conteúdo longo */
   width: 100%;
 }
 

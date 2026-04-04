@@ -169,6 +169,7 @@ export default function Detalhes() {
   const [agendamentoHoje,   setAgendamentoHoje]   = useState(null);
 
   useEffect(() => {
+    if (!id) return;
     async function fetchDados() {
       setLoading(true); setErro(null);
       try {
